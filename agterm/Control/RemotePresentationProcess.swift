@@ -127,7 +127,9 @@ private final class ProcessLink: RemotePresentationLink {
     private nonisolated static func readLines(from handle: FileHandle, wake: Pipe,
                                               deliver: @escaping @Sendable (Data) -> Void,
                                               ended: @escaping @Sendable () -> Void) {
-        let thread = Thread {
+        // explicit @Sendable: an inferred @MainActor closure here would trip the executor assertion
+        // on this thread.
+        let work: @Sendable () -> Void = {
             let fd = handle.fileDescriptor
             var polled = [pollfd(fd: fd, events: Int16(POLLIN), revents: 0),
                           pollfd(fd: wake.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)]
@@ -151,6 +153,7 @@ private final class ProcessLink: RemotePresentationLink {
             try? handle.close()
             ended()
         }
+        let thread = Thread(block: work)
         thread.name = "com.umputun.agterm.presentation.read"
         thread.start()
     }
