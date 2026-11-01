@@ -19,18 +19,13 @@ GHOSTTY_REPO="https://github.com/ghostty-org/ghostty"
 GHOSTTY_REV="683d8db643b95cf229bfb5fe9fab9ae677920343"  # 2026-08-25
 ZMX_REPO="https://github.com/neurosnap/zmx"
 ZMX_REV="8bab1f0173b07e79835ea372d749af3dbf0d0842"  # v0.8.1, 2026-09-05; SessionHostRuntime/DeviceAttributeResponder.swift copies its DA replies
-# The bundled zmx must match the app's architecture, so build for this host at the app's macOS 14 floor.
-# An explicit ZMX_TARGET wins for a cross-build.
-if [ -z "${ZMX_TARGET:-}" ]; then
-  case "$(uname -m)" in
-    arm64) ZMX_TARGET="aarch64-macos.14.0" ;;
-    x86_64) ZMX_TARGET="x86_64-macos.14.0" ;;
-    *)
-      echo "setup: unsupported host architecture $(uname -m)" >&2
-      exit 1
-      ;;
-  esac
+# This fork builds x86_64 only: the app, its helpers and zmx all ship one Intel slice, and libghostty is
+# built natively, so the build has to run on an Intel Mac.
+if [ "$(uname -m)" != "x86_64" ]; then
+  echo "setup: this fork builds x86_64 only; run it on an Intel Mac" >&2
+  exit 1
 fi
+ZMX_TARGET="x86_64-macos.14.0"
 # ghostty pins minimum_zig_version 0.16.0. Name the MINOR LINE, not `zig`: that one rolls, so a fresh
 # build once 0.17 is current would compile a fixed GHOSTTY_REV with a compiler it never supported. Today
 # `zig@0.16` is still an alias for `zig`, so this buys nothing yet — it claims the name Homebrew uses when
