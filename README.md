@@ -1,3 +1,24 @@
+> **This is a personal fork of [umputun/agterm](https://github.com/umputun/agterm), not an upstream release.**
+>
+> Its purpose is **Intel Mac (x86_64) support and builds patched for Xcode 26.3**, as a supplement to
+> the official release: upstream ships Apple Silicon builds only and does not support x86_64. Everything
+> below describes agterm itself; this fork differs in these ways:
+>
+> - **Builds are x86_64 only.** There is no arm64 slice and no Universal Binary; use upstream for Apple
+>   Silicon. No prebuilt releases are published here — build from source on an Intel Mac.
+> - The Xcode project and `scripts/build.sh`, `scripts/release.sh`, `scripts/setup.sh` target x86_64, and
+>   the bundled zmx is built for `x86_64-macos.14.0`. `setup.sh` refuses other host architectures because
+>   it builds libghostty natively for the host.
+> - Off-main `Thread` closures carry an explicit `@Sendable`. Xcode 26.3 (Swift 6.2.4) otherwise infers
+>   `@MainActor` for them, and the app dies with a `dispatch_assert_queue` assertion as soon as such a
+>   thread starts. The upstream release, built with a newer toolchain, does not show this.
+> - Builds are ad-hoc signed unless you supply your own Developer ID certificate; they are not notarized
+>   and not distributed through Homebrew.
+>
+> Build with `make run` (Debug) or `make build` (Release) on an Intel Mac. Upstream documentation,
+> badges, download links and the Homebrew cask all refer to upstream, not to this fork. Fork-specific
+> changes are the two commits on top of upstream `master`.
+
 # agterm - a simply good terminal with a full control API
 
 [![Build Status](https://github.com/umputun/agterm/workflows/build/badge.svg)](https://github.com/umputun/agterm/actions) [![Coverage Status](https://coveralls.io/repos/github/umputun/agterm/badge.svg?branch=master)](https://coveralls.io/github/umputun/agterm?branch=master)
