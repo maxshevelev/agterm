@@ -52,14 +52,17 @@ final class ControlStreamOwner: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &bound, socklen_t(MemoryLayout<timeval>.size))
 
         let writerDone = DispatchSemaphore(value: 0)
-        let writer = Thread { [self] in
+        // explicit @Sendable: an inferred @MainActor closure here would trip the executor assertion
+        // on this thread.
+        let writerWork: @Sendable () -> Void = { [self] in
             writeLoop()
             writerDone.signal()
         }
+        let writer = Thread(block: writerWork)
         writer.name = "com.umputun.agterm.control.stream.write"
         writer.start()
 
-        let reader = Thread { [self] in
+        let readerWork: @Sendable () -> Void = { [self] in
             readLoop(onLine: onLine)
             shutdown()
             writerDone.wait()
@@ -69,6 +72,7 @@ final class ControlStreamOwner: @unchecked Sendable {
             state.unlock()
             onClose()
         }
+        let reader = Thread(block: readerWork)
         reader.name = "com.umputun.agterm.control.stream.read"
         reader.start()
     }

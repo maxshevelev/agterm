@@ -10,9 +10,12 @@ enum OpenCodeEnvironmentProbe {
     static func detect(environment: [String: String], timeout: TimeInterval = 3,
                        executableURL: URL? = nil) async -> Result? {
         await withCheckedContinuation { continuation in
-            Thread.detachNewThread {
+            // explicit @Sendable: an inferred @MainActor closure here would trip the executor assertion
+            // on the detached thread.
+            let work: @Sendable () -> Void = {
                 continuation.resume(returning: run(environment: environment, timeout: timeout, executableURL: executableURL))
             }
+            Thread.detachNewThread(work)
         }
     }
 

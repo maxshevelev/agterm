@@ -10,9 +10,12 @@ struct RemoteCommandProcessRunner: RemoteCommandRunner {
 
     func run(_ argv: [String], deadline: TimeInterval) async -> RemoteCommandResult {
         await withCheckedContinuation { continuation in
-            Thread.detachNewThread {
+            // explicit @Sendable: an inferred @MainActor closure here would trip the executor assertion
+            // on the detached thread.
+            let work: @Sendable () -> Void = {
                 continuation.resume(returning: Self.execute(argv, deadline: deadline))
             }
+            Thread.detachNewThread(work)
         }
     }
 
