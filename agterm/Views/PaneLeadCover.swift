@@ -3,7 +3,7 @@ import SwiftUI
 
 /// PaneLeadCover covers a pane whose zmx client does not lead, since its terminal is laid out for another
 /// client's grid. It stays mounted so the pane's ZStack keeps one shape (see `sessionDetail`). The cover
-/// takes hits and a click focuses the pane; the reconnect note draws uncovered too and never takes hits.
+/// takes hits and a click acts like a key press; the reconnect note draws uncovered too and never takes hits.
 /// Every host of a pane's terminal mounts one directly over it, under any pane overlay.
 struct PaneLeadCover: View {
     let session: Session
@@ -27,7 +27,7 @@ struct PaneLeadCover: View {
                                     remote: session.remoteHost != nil))
                         .font(.system(size: 14, weight: .medium))
                     if !book.reattaching(pane: identity) {
-                        Text("Press any key to use it here")
+                        Text("Press any key or click to use it here")
                             .font(.system(size: 12))
                             .opacity(0.7)
                     }
@@ -43,7 +43,7 @@ struct PaneLeadCover: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { focusPane() }
+        .onTapGesture { takePane() }
         .allowsHitTesting(covered)
     }
 
@@ -53,9 +53,12 @@ struct PaneLeadCover: View {
         return remote ? "In use on the Mac it runs on" : "In use from another Mac"
     }
 
-    private func focusPane() {
+    private func takePane() {
         let surface = pane == .left ? session.surface : session.splitSurface
-        (surface as? GhosttySurfaceView)?.focusAfterReparent()
+        guard let view = surface as? GhosttySurfaceView else { return }
+        // focus first: the replacement inherits focus only from a surface that holds it
+        view.focusAfterReparent()
+        PaneLead.clicked(view)
     }
 }
 
