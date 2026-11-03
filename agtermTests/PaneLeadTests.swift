@@ -121,6 +121,38 @@ final class PaneLeadTests: XCTestCase {
         XCTAssertTrue(reattached.isEmpty)
     }
 
+    func testAClickOnACoveredPaneTakesTheLeadOnce() throws {
+        let (view, identity) = pane()
+        PaneLead.report(try notice("n:follower:1"), from: view)
+
+        PaneLead.clicked(view)
+        XCTAssertEqual(reattached.map(\.claim), [true])
+
+        ZmxLeadBook.shared.begin(ZmxLeadAttachment(nonce: "fresh", claim: true), pane: identity, reattaching: true)
+        PaneLead.clicked(view)
+        XCTAssertEqual(reattached.count, 1)
+    }
+
+    func testAClickOnAPaneThatLeadsTakesNothing() throws {
+        let (view, _) = pane()
+        PaneLead.report(try notice("n:leader:1"), from: view)
+
+        PaneLead.clicked(view)
+
+        XCTAssertTrue(reattached.isEmpty)
+    }
+
+    func testAClickOnAWaitingPaneRetriesNowWithoutTakingTheLead() throws {
+        let (view, identity) = pane()
+        let book = RemoteReconnectBook.shared
+        book.wait(pane: identity, session: UUID(), host: "mini", cover: true, now: Date())
+
+        PaneLead.clicked(view)
+
+        XCTAssertEqual(book.due(now: Date()), [identity])
+        XCTAssertTrue(reattached.isEmpty)
+    }
+
     func testAnUncoveredPanesKeysAreItsOwn() throws {
         let (view, _) = pane()
         PaneLead.report(try notice("n:leader:1"), from: view)

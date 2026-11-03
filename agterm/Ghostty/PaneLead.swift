@@ -81,6 +81,18 @@ enum PaneLead {
         reattach?(view, true)
         return true
     }
+
+    /// A click on the pane's cover asks for what a key press asks for. It ends on mouse-up, so unlike a key
+    /// it leaves nothing to swallow from the fresh surface.
+    static func clicked(_ view: GhosttySurfaceView) {
+        let pane = UUID(uuidString: view.paneToken)
+        if RemoteReconnectBook.shared.waiting(pane: pane), let pane {
+            RemoteReconnectBook.shared.retryNow(pane: pane, now: Date())
+            return
+        }
+        guard view.leadCovered, !ZmxLeadBook.shared.reattaching(pane: pane) else { return }
+        reattach?(view, true)
+    }
 }
 
 /// What a fresh attach of an existing pane spawns with. It attaches and never creates: the trailing

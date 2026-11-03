@@ -2128,7 +2128,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   it sits BELOW the pane's own pane overlay and hides while one is up, terminal zoom, and the dashboard.
   The daemon ignores a session switch while its leader is managed: the client's nonce, its generation and
   what it reads and types through the daemon are all bound to that one session. Taking the lead is always a FRESH attach into a
-  new surface, by the first key on the cover, by `session.lead`, or by itself when the role turns
+  new surface, by the first key or a click on the cover, by `session.lead`, or by itself when the role turns
   `unowned`. The automatic one omits the claim, so it leads only if the daemon is still unowned when it
   arrives and cannot take a lead someone claimed meanwhile. In place repair was rejected: libghostty
   reports a new grid before its terminal has it, and the role report reaches the app a main-queue hop
