@@ -74,8 +74,9 @@ public enum TextPage {
 
     /// validate returns the file's text, nil when it is not valid UTF-8 or holds a NUL, which marks a binary.
     public static func validate(_ data: Data) -> String? {
-        guard !data.contains(0) else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { return nil }
+        // macOS 26 drops a leading BOM while decoding and macOS 15 keeps it, ahead of a page's doctype
+        return text.unicodeScalars.first == "\u{FEFF}" ? String(text.unicodeScalars.dropFirst()) : text
     }
 
     /// SearchState is the search a built page starts with: the model's query and revision, and the match it showed

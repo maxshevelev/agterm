@@ -139,7 +139,8 @@ struct TextPageTests {
     @Test func validateAcceptsUTF8AndRefusesBinaries() {
         #expect(TextPage.validate(Data("héllo\n".utf8)) == "héllo\n")
         #expect(TextPage.validate(Data()) == "")
-        #expect(TextPage.validate(Data([0xEF, 0xBB, 0xBF, 0x61])) != nil)
+        #expect(TextPage.validate(Data([0xEF, 0xBB, 0xBF, 0x61])) == "a")
+        #expect(TextPage.validate(Data([0xEF, 0xBB, 0xBF, 0xCC, 0x81])) == "\u{0301}")
         #expect(TextPage.validate(Data([0x61, 0x00, 0x62])) == nil)
         #expect(TextPage.validate(Data([0xFF, 0xFE, 0x61])) == nil)
         #expect(TextPage.validate(Data([0x61, 0xC3])) == nil)
