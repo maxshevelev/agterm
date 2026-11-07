@@ -5,19 +5,21 @@
 > below describes agterm itself; this fork differs in these ways:
 >
 > - **Builds are x86_64 only.** There is no arm64 slice and no Universal Binary; use upstream for Apple
->   Silicon. No prebuilt releases are published here — build from source on an Intel Mac.
+>   Silicon. Ad-hoc signed DMGs are published under this fork's Releases.
 > - The Xcode project and `scripts/build.sh`, `scripts/release.sh`, `scripts/setup.sh` target x86_64, and
 >   the bundled zmx is built for `x86_64-macos.14.0`. `setup.sh` refuses other host architectures because
 >   it builds libghostty natively for the host.
+> - Homebrew has no Intel bottle for zig 0.17, which libghostty needs. Point `AGTERM_GHOSTTY_ZIG` at a zig 0.17
+>   binary from [ziglang.org](https://ziglang.org/download/) to skip building it from source.
 > - Off-main `Thread` closures carry an explicit `@Sendable`. Xcode 26.3 (Swift 6.2.4) otherwise infers
 >   `@MainActor` for them, and the app dies with a `dispatch_assert_queue` assertion as soon as such a
 >   thread starts. The upstream release, built with a newer toolchain, does not show this.
 > - Builds are ad-hoc signed unless you supply your own Developer ID certificate; they are not notarized
 >   and not distributed through Homebrew.
 >
-> Build with `make run` (Debug) or `make build` (Release) on an Intel Mac. Upstream documentation,
+> Build with `make run` (Debug) or `make release` (Release) on an Intel Mac. Upstream documentation,
 > badges, download links and the Homebrew cask all refer to upstream, not to this fork. Fork-specific
-> changes are the two commits on top of upstream `master`.
+> changes are the commits on top of upstream `master`.
 
 # agterm - a simply good terminal with a full control API
 

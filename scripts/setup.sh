@@ -90,9 +90,15 @@ fi
 # resolved through the keg prefix rather than PATH, so a machine still linking an older zig for another
 # project builds with the right one and keeps its own `zig` untouched. called only by the build that
 # needs it, so a zmx-only run never installs ghostty's compiler.
+# A non-empty second argument names a zig binary to use instead: Homebrew ships no Intel bottle for
+# zig 0.17, so this fork takes ziglang.org's build through AGTERM_GHOSTTY_ZIG.
 zig_for() {
   local formula="$1" want="${1#zig@}" zig ver
-  zig="$(brew --prefix "$formula" 2>/dev/null || true)/bin/zig"
+  zig="${2:-$(brew --prefix "$formula" 2>/dev/null || true)/bin/zig}"
+  if [[ -n "${2:-}" && ! -x "$zig" ]]; then
+    echo "error: $zig is not an executable zig" >&2
+    return 1
+  fi
   if [[ ! -x "$zig" ]]; then
     echo "installing $formula..." >&2
     brew install "$formula" >&2 || return 1
@@ -178,7 +184,7 @@ if $need_xc || $need_res; then
     git -C "$ghostty_build" apply --whitespace=nowarn "$PWD/$ghostty_patch"
   done
 
-  GHOSTTY_ZIG="$(zig_for "$GHOSTTY_ZIG_FORMULA")"
+  GHOSTTY_ZIG="$(zig_for "$GHOSTTY_ZIG_FORMULA" "${AGTERM_GHOSTTY_ZIG:-}")"
   echo "building GhosttyKit.xcframework with zig (a few minutes)..."
   ( cd "$ghostty_build" && "$GHOSTTY_ZIG" build -Doptimize=ReleaseFast -Demit-xcframework=true \
       -Dxcframework-target=native -Demit-macos-app=false )
