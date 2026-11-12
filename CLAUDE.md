@@ -25,11 +25,17 @@ C-boundary concurrency before changing the bridge.
 - For every new capability, propose useful control API/CLI coverage: protocol command and arguments,
   dispatch, `agtermctl`, read-back, and tests. Control-native features count; skip only chrome with nothing
   meaningful to drive.
+- A session attached from another Mac is a normal view, not an extra.
+  Every new or changed capability that works locally works there too, unless it was explicitly deferred
+  or declined: design the remote path (presentation, page serving, control routing) together with the
+  local one, and a missing remote path is part of the task, never an exclusion to note.
 - For each hideable titlebar/sidebar element, ask whether it should join host-free `InterfaceElement` and
   Settings > Interface. Never add that preference without approval.
   A control enabled there stays visible and is disabled when it cannot act; never show or hide it by state.
-- The HTML overlay displays HTML over a session; it is not a browser. Following links, history and back are the
-  browser's job, so link features that turn the overlay into one are declined.
+- The HTML overlay displays a page over a session; it is not a browser.
+  Moving within what the page was opened with is in scope: an HTML file's grant folder, a markdown file's link
+  root, a URL page's origin, and any origin for a `--browse` page; a terminal click may replace a hidden clicked page.
+  Features that make it a general browser (tabs, an address bar, links followed past those bounds) are declined.
   What a mouse-capturing program does with a click is that program's, not agterm's.
 - A decline of a feature request that a custom command covers explains the extension model with the request
   as the worked example: README's "bind X yourself", `site/docs.html#extend`, the agent skill, the cookbook.
@@ -62,6 +68,8 @@ C-boundary concurrency before changing the bridge.
 - The control socket binds from the window scene's task, so a backgrounded `open -n -g` can leave the app
   running with no socket until a window renders.
   If the socket is still absent 10 s after launch, activate the instance; never leave a socket wait unbounded.
+  An activation by pid once left it unbound for 15 s more (2026-11-07); stopping it and relaunching without `-g`
+  bound the socket at once.
 - `agtermctl` never reads `AGTERM_SOCKET`; it resolves `--socket`, then `AGTERM_STATE_DIR`, then
   `~/Library/Application Support/agterm`. A shell inside the live terminal therefore defaults onto the
   live socket, and exporting a short `AGTERM_STATE_DIR` is what keeps inherited commands off it.
@@ -100,10 +108,15 @@ C-boundary concurrency before changing the bridge.
   files, and 800-line types; test configs raise file/type limits to 2000 and inherit all other rules.
   Disabled/tuned rules reflect deliberate conventions. Zero findings are required.
 - Every change must build, pass `swift test`, `make test-app`, and `make lint`.
+- An intermittent CI failure is looked up in `docs/ci-flakes.md` by test name or log text before it is
+  investigated, and gets an entry there once it is understood.
 - Run each gate ONCE, at the end, and scope everything else to what changed: a new or changed test runs
   via `-only-testing:<Target>/<Class>/<test>`. Never re-run a whole XCUITest suite to verify a narrow
   change; `agtermUITests/ControlAPIUITests` alone is 82 methods and about 7.5 minutes, and tells you
   nothing the targeted run did not.
+- The app build's Bundle helper executables phase runs `swift build` on `agtermCore/.build`, so any SwiftPM
+  process holding that directory (a hung `swift test` included) stalls `xcodebuild` there with no output;
+  check `ps` for one before reading a quiet build as compiling.
 - **An XCUITest run started from a shell inside a live agterm window can die at runner init** with
   `Failed to initialize for UI testing ... Timed out while enabling automation mode` after 60s, before any
   test case runs. The block is at runner initialization, so app code under test cannot reach it; it is not
@@ -238,7 +251,8 @@ C-boundary concurrency before changing the bridge.
 
 - `scripts/setup.sh` builds upstream `ghostty-org/ghostty` at `GHOSTTY_REV` using
   `zig build -Demit-xcframework=true -Dxcframework-target=native`, after applying
-  `scripts/ghostty-patches/*.patch`. That directory documents the teardown backport and its removal.
+  `scripts/ghostty-patches/*.patch`, then runs the teardown patch's Zig tests before staging anything.
+  That directory documents each backport, its tests and its removal.
 - `GHOSTTY_REV` is `83fb956` (v1.4.0, 2026-10-27), a plain reproducibility pin carrying upstream's
   hidden-surface GPU release.
   It sat at `4dcb09ada` (2026-04-30) from June while later builds blanked scrollback on a font-size
@@ -377,6 +391,7 @@ spans intact, and format long catalogs as lists.
 - `keymap.md`: keymap parser, built-ins, custom commands/tokens, reload/edit.
 - `notifications.md`: OSC/control notifications, suppression, reveal, badges, status.
 - `ui-tests.md`: launch isolation including FB11763863, AppKit/XCUITest traps, cadence.
+- `tests.md`: shared state, clocks, waits, ptys and stubs that keep any suite from flaking on CI.
 - `libghostty.md`: surfaces, rendering, AppKit, theme, overlays, cursor.
 - `app-icon.md`: adaptive Icon Composer build.
 - `ci.md`: jobs, filters, coverage, badge.

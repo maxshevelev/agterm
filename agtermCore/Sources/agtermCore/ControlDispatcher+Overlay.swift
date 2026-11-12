@@ -137,6 +137,15 @@ extension ControlDispatcher {
             case .pane(let pane):
                 return actions.setSessionOverlayFollow(request.target, window: request.args?.window, pane: pane, mode: mode)
             }
+        case .sessionOverlayWrap:
+            guard let mode = ControlToggleMode.parse(request.args?.mode) else {
+                return ControlResponse(ok: false, error: "invalid overlay wrap mode: \(request.args?.mode ?? "toggle")")
+            }
+            switch parseOverlayPane(request.args?.pane) {
+            case .rejected(let response): return response
+            case .pane(let pane):
+                return actions.setSessionOverlayWrap(request.target, window: request.args?.window, pane: pane, mode: mode)
+            }
         case .sessionOverlayHide, .sessionOverlayShow, .sessionOverlayToggle:
             let mode: OverlayVisibilityMode = request.cmd == .sessionOverlayHide ? .hide
                 : (request.cmd == .sessionOverlayShow ? .show : .toggle)
@@ -151,7 +160,7 @@ extension ControlDispatcher {
                 return ControlResponse(ok: false, error: "session.overlay.job.run requires a job id")
             }
             guard UUID(uuidString: job) != nil else { return ControlResponse(ok: false, error: "invalid job id") }
-            return actions.claimOverlayJob(job)
+            return actions.claimOverlayJob(job, token: request.args?.token)
         case .sessionOverlayPageServe:
             guard let token = request.target?.trimmedOrNil else {
                 return ControlResponse(ok: false, error: "session.overlay.page.serve requires a page token")
@@ -249,7 +258,7 @@ extension ControlDispatcher {
 
     private static func markdownContent(_ path: String, args: ControlArgs?) -> OverlayContent {
         let reject = { (error: String) in OverlayContent.rejected(ControlResponse(ok: false, error: error)) }
-        let flags = [args?.wait, args?.navigation, args?.javascript, args?.chromeless, args?.persistent, args?.browse]
+        let flags = [args?.wait, args?.javascript, args?.chromeless, args?.persistent, args?.browse]
         if args?.cwd != nil || flags.contains(true) { return reject(OverlayHtmlError.markdownOptions) }
         guard path.hasPrefix("/") else { return reject(OverlayHtmlError.markdownNotAbsolute) }
         let url = URL(fileURLWithPath: path).standardizedFileURL

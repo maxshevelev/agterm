@@ -108,6 +108,19 @@ final class ControlServerForwardedClickTests: XCTestCase {
         XCTAssertEqual(presenter.requests.first?.sizePercent, 75)
     }
 
+    func testAClickedMarkdownFileReachesThePresenterWithNavigationAndItsLinkGrant() async throws {
+        let (_, session) = try addSession()
+        let presenter = try present(session)
+        let file = try write("a.md", "# a\n")
+
+        click(file, in: session, pane: session.paneIdentity)
+        try await waitUntil { presenter.requests.count == 1 }
+
+        XCTAssertEqual(presenter.requests.first?.navigation, true)
+        XCTAssertEqual(presenter.requests.first?.markdownLinks, MarkdownPage.linkGrant(for: file))
+        XCTAssertNotNil(presenter.requests.first?.markdownLinks)
+    }
+
     func testABrowserModeClickOpensAtNinetyFivePercent() async throws {
         let (_, session) = try addSession()
         let presenter = try present(session)
@@ -126,6 +139,7 @@ final class ControlServerForwardedClickTests: XCTestCase {
             (stateDir.appendingPathComponent("gone.md").path, session.paneIdentity, .notFound),
             ("src/gone.py:3", session.paneIdentity, .notFound),
             (binary, session.paneIdentity, .notAPage),
+            ("agterm://session/0F5C1E2A-3B4D-4E6F-8A9B-0C1D2E3F4A5B", session.paneIdentity, .notAPage),
             ("https://example.com/a", session.paneIdentity, .notAPage),
             (try write("x.md", "# x\n"), UUID(), .paneNotAttached),
         ]
@@ -257,7 +271,7 @@ final class ControlServerForwardedClickTests: XCTestCase {
         server.attachPresentationHub()
         let sink = Presenter()
         let kinds = PresentationHub.pageKinds + [PresentationHub.pageContentKind, PresentationHub.pageDocumentKind,
-                                                 PresentationHub.linkClickKind]
+                                                 PresentationHub.linkClickKind, PresentationHub.pageLinksKind]
         let id = try server.presentationHub.subscribe(
             session: session.id, hello: PresentationHello(version: 1, kinds: kinds, mode: .presenter), sink: sink
         ) { PresentationSnapshot(status: nil, hud: nil) }

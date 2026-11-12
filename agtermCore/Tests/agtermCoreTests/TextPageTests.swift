@@ -56,6 +56,14 @@ struct TextPageTests {
         #expect(!TextPage.html(text: "x", language: "diff", line: nil, style: "", change: 0).contains("data-change"))
     }
 
+    @Test func aWrappedPageIsMarkedAndAnUnwrappedOneIsNot() {
+        let log = TextLogState(following: true)
+
+        #expect(TextPage.html(text: "x", language: nil, line: nil, style: "", wrap: true).contains(#"hidden data-wrap>"#))
+        #expect(TextPage.html(text: "x", language: nil, line: nil, style: "", log: log, wrap: true).contains("data-wrap"))
+        #expect(!TextPage.html(text: "x", language: nil, line: nil, style: "").contains("data-wrap"))
+    }
+
     @Test func aDiffMapsEachHeaderPathToItsLanguage() {
         let text = """
             diff --git a/main.go b/main.go
@@ -74,6 +82,11 @@ struct TextPageTests {
 
     @Test func aCRLFDiffMapsItsHeaderPaths() {
         #expect(TextPage.diffLanguages(in: "diff --git a/x.go b/x.go\r\n--- a/x.go\r\n+++ b/x.go\r\n") == ["a/x.go": "go", "b/x.go": "go"])
+    }
+
+    @Test func aColoredDiffMapsItsHeaderPathsWithoutTheEscapes() {
+        let text = "\u{1B}[1mdiff --git a/x.go b/x.go\u{1B}[m\n\u{1B}[1m--- a/x.go\u{1B}[m\n\u{1B}[1m+++ b/x.go\u{1B}[m\n"
+        #expect(TextPage.diffLanguages(in: text) == ["a/x.go": "go", "b/x.go": "go"])
     }
 
     @Test func aDiffUnderTheHighlightCapCarriesItsFileLanguages() {

@@ -19,7 +19,7 @@ extension AppStore {
         }
         let overlay = HtmlOverlay(source: source, navigation: page.navigation, javascript: page.javascript,
                                   chromeless: page.chromeless, persistent: page.persistent, browse: page.browse,
-                                  replicaOf: origin)
+                                  replicaOf: origin, markdownLinks: page.markdownLinks)
         if let failure = openHtmlOverlay(id, pane: pane, overlay: overlay, sizePercent: page.sizePercent, points: page.points,
                                          backgroundColor: page.backgroundColor) {
             return failure.message(pane: pane)
@@ -36,27 +36,48 @@ extension AppStore {
         case .markdown(let path): return .replica(path: path, content: .markdown)
         case .text(let path, let line): return .replica(path: path, content: .text(line: line))
         case .document(let path): return .replica(path: path, content: .document)
+        // the presenter's own forward decides the URL, so a forwarded source is rewritten before it gets here
+        case .forwarded: return nil
         }
     }
 
     /// addReplicaPageCompanion shows another Mac's page companion as a companion of `parentID`, a row attached from
     /// that Mac; the page stays the other Mac's, so closing the row here ends nothing there.
-    public func addReplicaPageCompanion(to parentID: UUID, page: PresentationPage,
-                                        select: Bool) -> Result<Session, ReplicaPageRefusal> {
+    public func addReplicaPageCompanion(to parentID: UUID, page: PresentationPage, select: Bool,
+                                        remoteSessionID: String? = nil) -> Result<Session, ReplicaPageRefusal> {
         guard let parent = session(withID: parentID), parent.parentID == nil, let host = parent.remoteHost,
               let workspace = workspace(forSession: parentID)?.id else { return .failure(.init("the parent row here is gone")) }
-        guard let origin = UUID(uuidString: page.page), let source = Self.replicaSource(page.source) else {
-            return .failure(.init("the page cannot be shown here"))
-        }
+        guard let overlay = Self.replicaOverlay(page) else { return .failure(.init("the page cannot be shown here")) }
         guard let row = addSession(toWorkspace: workspace, cwd: FileManager.default.homeDirectoryForCurrentUser.path,
-                                   select: select, remoteHost: host, parentID: parentID, content: .page) else {
+                                   select: select, remoteHost: host, remoteSessionID: remoteSessionID,
+                                   parentID: parentID, content: .page) else {
             return .failure(.init("the parent row here is gone"))
         }
-        let overlay = HtmlOverlay(source: source, navigation: page.navigation, javascript: page.javascript,
-                                  chromeless: page.chromeless, persistent: page.persistent, browse: page.browse,
-                                  replicaOf: origin)
-        if let failure = openHtmlOverlay(row.id, pane: nil, overlay: overlay, sizePercent: nil,
-                                         backgroundColor: page.backgroundColor) {
+        return showReplicaPage(overlay, backgroundColor: page.backgroundColor, in: row)
+    }
+
+    /// addReplicaPageRoot shows another Mac's top-level page session as a top-level row of `workspaceID`; like a
+    /// replica page companion it stays the other Mac's page.
+    public func addReplicaPageRoot(toWorkspace workspaceID: UUID, host: String, name: String?, page: PresentationPage,
+                                   select: Bool, remoteSessionID: String? = nil) -> Result<Session, ReplicaPageRefusal> {
+        guard let overlay = Self.replicaOverlay(page) else { return .failure(.init("the page cannot be shown here")) }
+        guard let row = addSession(toWorkspace: workspaceID, cwd: FileManager.default.homeDirectoryForCurrentUser.path,
+                                   name: name, select: select, remoteHost: host, remoteSessionID: remoteSessionID,
+                                   content: .page) else {
+            return .failure(.init("the workspace here is gone"))
+        }
+        return showReplicaPage(overlay, backgroundColor: page.backgroundColor, in: row)
+    }
+
+    private static func replicaOverlay(_ page: PresentationPage) -> HtmlOverlay? {
+        guard let origin = UUID(uuidString: page.page), let source = replicaSource(page.source) else { return nil }
+        return HtmlOverlay(source: source, navigation: page.navigation, javascript: page.javascript,
+                           chromeless: page.chromeless, persistent: page.persistent, browse: page.browse, replicaOf: origin)
+    }
+
+    private func showReplicaPage(_ overlay: HtmlOverlay, backgroundColor: String?,
+                                 in row: Session) -> Result<Session, ReplicaPageRefusal> {
+        if let failure = openHtmlOverlay(row.id, pane: nil, overlay: overlay, sizePercent: nil, backgroundColor: backgroundColor) {
             closeSession(row.id)
             return .failure(.init(failure.message(pane: nil)))
         }

@@ -58,8 +58,9 @@ public enum TextPage {
     /// file's language. A changed row can look like a header, so the renderer looks up only rows outside hunks.
     static func diffLanguages(in text: String) -> [String: String] {
         var found: [String: String] = [:]
-        for row in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        where row.hasPrefix("--- ") || row.hasPrefix("+++ ") {
+        for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let row = TerminalText.strippingEscapes(String(raw))
+            guard row.hasPrefix("--- ") || row.hasPrefix("+++ ") else { continue }
             let path = String(row.dropFirst(4).prefix { $0 != "\t" })
             let file = path.count > 1 && path.hasPrefix("\"") && path.hasSuffix("\"") ? String(path.dropFirst().dropLast()) : path
             if let language = language(forFile: file) { found[path] = language }
@@ -101,9 +102,11 @@ public enum TextPage {
     /// is the scroll offset a rebuilt page reopens at, a paused log page's or a plain page's.
     /// A plain page of a diff is marked whatever its size, so change navigation outlives the highlighting limit;
     /// `change` is the change a rebuilt page reopens on, from 1. Under the limit a diff also carries `diffLanguages`
-    /// as JSON, so each file's lines are highlighted in that file's language.
+    /// as JSON, so each file's lines are highlighted in that file's language. `wrap` opens the page with long lines
+    /// wrapped.
     public static func html(text: String, language: String?, line: Int?, style: String, log: TextLogState? = nil,
-                            anchor: Double? = nil, search: SearchState? = nil, change: Int? = nil) -> String {
+                            anchor: Double? = nil, search: SearchState? = nil, change: Int? = nil,
+                            wrap: Bool = false) -> String {
         var attributes = ""
         let highlighted = text.utf8.count <= maxHighlightBytes
         if log == nil, language == diffLanguage {
@@ -134,6 +137,7 @@ public enum TextPage {
             attributes += " data-line=\"\(line)\""
         }
         if let anchor, anchor.isFinite { attributes += " data-anchor=\"\(anchor)\"" }
+        if wrap { attributes += " data-wrap" }
         return """
         <!doctype html><html><head><meta charset="utf-8">\
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">\

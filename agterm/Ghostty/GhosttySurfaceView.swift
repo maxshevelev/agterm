@@ -136,10 +136,9 @@ final class GhosttySurfaceView: NSView, PaneRoleMutableSurface {
     /// control-driven; this is the one input-driven clear, for the decline case Claude Code fires no hook for.
     var onUserInputClearsStatus: ((StatusKeystroke) -> Void)?
 
-    /// Called on the main actor on EVERY keystroke to stamp user activity and reset the window's auto-follow
-    /// idle timer. Fires unconditionally, unlike `onUserInputClearsStatus`: ordinary typing in an idle
-    /// session must count as activity or the user is yanked to a blocked session mid-type.
-    var onUserInput: (() -> Void)?
+    /// onUserInput carries the key kind for Badge reset; every key counts as activity to hold off
+    /// auto-follow.
+    var onUserInput: ((StatusKeystroke) -> Void)?
     /// Called after a size push and after a cell-size change; a HUD panel is measured from this surface.
     var onGridChange: (() -> Void)?
 
@@ -360,6 +359,8 @@ final class GhosttySurfaceView: NSView, PaneRoleMutableSurface {
     // the nonisolated URL callback snapshots this during the synchronous release call.
     nonisolated let releaseIntent = OSAllocatedUnfairLock(initialState: LinkPolicy.ClickIntent.normal)
     var linkPressDragged = false
+    /// Whether any mouse button is down, system-wide; replaceable because a real click elsewhere answers it too.
+    var mouseButtonsDown: () -> Bool = { NSEvent.pressedMouseButtons != 0 }
 
     // admitted by the off-main SET_TITLE callback, completed by the main block it queues.
     nonisolated let titleAdmission = OSAllocatedUnfairLock(initialState: TitleAdmission())
@@ -469,8 +470,6 @@ final class GhosttySurfaceView: NSView, PaneRoleMutableSurface {
     func updateGhosttyFocus() {
         guard let surface else { return }
         ghostty_surface_set_focus(surface, liveFocus)
-        // a view can hold first responder before its surface exists; creation lands here.
-        TerminalInputSource.shared.requestRefresh()
         // `isAccessibilityFocused` mirrors `liveFocus`; AX must hear it move. This covers the key-window and
         // (re)attach paths only — the first-responder transitions post for themselves, since they run before
         // AppKit has updated `window.firstResponder` and never reach this method.
@@ -851,7 +850,6 @@ final class GhosttySurfaceView: NSView, PaneRoleMutableSurface {
         windowVisibilityObservation = nil
         if let surface { ghostty_surface_free(surface) }
         surface = nil
-        TerminalInputSource.shared.requestRefresh()
         // release the custom layer libghostty installed and this view still retains. The current pin clears
         // its display callback in `IOSurfaceLayer.release`, so this defends builds predating that fix, where
         // the callback kept pointing at the freed renderer and the next CoreAnimation display locked a mutex

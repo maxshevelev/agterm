@@ -64,6 +64,7 @@ class HtmlPageTestCase: XCTestCase {
         registry.sharing = SystemHtmlSharing()
         registry.setZoom(1)
         registry.dispatch = nil
+        registry.closePageSession = nil
         store.closeSession(session.id)
         try await afterSessionClose()
         try? FileManager.default.removeItem(at: directory)
@@ -82,8 +83,9 @@ class HtmlPageTestCase: XCTestCase {
         }
     }
 
-    func waitForScript(_ script: String, in view: WKWebView, _ matches: @escaping (String) -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(10)
+    func waitForScript(_ script: String, in view: WKWebView, timeout: TimeInterval = 10,
+                       _ matches: @escaping (String) -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while true {
             let value = try await view.evaluateJavaScript("String(\(script))") as? String ?? ""
             if matches(value) { return }

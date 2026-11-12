@@ -44,7 +44,12 @@ paths:
 - Claude maps prompt/tool work to `active --blink`, Stop to `completed --auto-reset`, and a permission
   request to blocked. `PermissionRequest` fires as the prompt opens.
   `Notification[permission_prompt]` waits about six idle seconds and stays for the sandboxed network
-  prompt, which `PermissionRequest` skips. PostToolUse clears a prior block because there is no answer event.
+  prompt, which `PermissionRequest` skips. The main thread's PostToolUse clears a prior block because there is
+  no answer event; a subagent's cannot, being `--if-idle`.
+  `agterm-claude-status.sh` reads the hook payload (non-terminal stdin, 2-second bound, plutil or jq key paths):
+  an event carrying `agent_id` adds `--if-idle` to `active`, and a Stop whose `background_tasks` lists a
+  running subagent or workflow posts `active --blink` in place of `completed`, dropping the caller's flags
+  so `--auto-reset` cannot idle the row. Anything else, an unreadable payload included, posts argv.
 - Codex maps SessionStart idle; prompt/pre/post tool active; Stop ending `?` blocked, otherwise completed.
   Those first four report nothing for a null `transcript_path`: Codex's ephemeral memory consolidation
   thread fires them but never a user Stop, so they would leave the pane active.
@@ -167,13 +172,13 @@ renumbering. Do not reintroduce a count anywhere.
 - `tree`, `events.read`
 - `workspace.new`, `.rename`, `.delete`, `.select`, `.go`, `.move`, `.focus`, `.filter`, `.flag`, `.collapse`,
   `.expand`, `.tint`
-- `session.new`, `.duplicate`, `.companion.new`, `.companion.page`, `.companion.duplicate`, `.companion.page.attach`, `.collapse`, `.expand`, `.close`, `.select`, `.rename`, `.reveal`, `.move`, `.type`, `.split`,
+- `session.new`, `.duplicate`, `.companion.new`, `.companion.page`, `.companion.duplicate`, `.companion.convert`, `.companion.page.attach`, `.page`, `.collapse`, `.expand`, `.close`, `.select`, `.rename`, `.reveal`, `.move`, `.type`, `.split`,
   `.split.close`, `.swap`, `.lead`,
   `.scratch`, `.focus`, `.resize`, `.go`, `.copy`, `.paste`, `.selectall`, `.text`, `.search`, `.status`,
   `.flag`, `.tint`, `.info`, `.seen`, `.restore`, `.restart`, `.background`, `.overlay.open`, `.overlay.close`, `.overlay.resize`,
   `.overlay.reload`, `.overlay.navigate`,
   `.overlay.result`, `.overlay.submit`, `.overlay.copy`, `.overlay.text`, `.overlay.job.run`, `.overlay.page.serve`, `.overlay.hide`,
-  `.overlay.show`, `.overlay.toggle`, `.overlay.follow`, `.overlay.search`, `.overlay.changes`, `.hud.open`, `.hud.update`,
+  `.overlay.show`, `.overlay.toggle`, `.overlay.follow`, `.overlay.search`, `.overlay.changes`, `.overlay.wrap`, `.hud.open`, `.hud.update`,
   `.hud.close`
 - `surface.zoom`, `surface.cursor`, `dashboard`, `pick.open`, `pick.result`, `pick.cancel`,
   `ask.open`, `ask.result`, `ask.cancel`
@@ -183,20 +188,22 @@ renumbering. Do not reintroduce a count anywhere.
   `notify`
 - `font.inc`, `font.dec`, `font.reset`
 - `window.new`, `.list`, `.select`, `.go`, `.close`, `.rename`, `.delete`, `.resize`, `.move`, `.zoom`,
-  `.fullscreen`, `.minimize`
+  `.fullscreen`, `.minimize`, `.remote.open`, `.remote.dismiss`
+- `session.detach`, `session.reattach`, `workspace.detach`, `workspace.reattach`: a remote window's rows only
 - `keymap.reload`, `keymap.list`, `keymap.run`, `hooks.reload`, `hooks.list`, `browser.clear`, `browser.links`, `config.reload`, `theme.set`, `theme.list`,
   `restore.capture`,
   `restore.clear`, `restore.mode`, `version`
 - `recent.list`, `recent.open`, `recent.clear`
 - `zmx.list`, `zmx.screen`, `zmx.prune`, `zmx.kill`, `zmx.reset`, `zmx.tree`, `zmx.attach`, `zmx.attach.group`, `zmx.present`
+- `catalog.subscribe`, `catalog.op`: served only by agterm-server; a Mac app refuses them and any `opID`
 
-`terminfo install` is a CLI-only command with no protocol counterpart, one of the two exemptions from the
+`terminfo install` is a CLI-only command with no protocol counterpart, one of the three exemptions from the
 protocol/dispatcher contract: it runs `infocmp` and `ssh` locally and never opens the socket, so there is
 nothing for the app to dispatch or read back. `TerminfoInstall` in `agtermCore` owns the argv and the
 pipeline; the CLI owns the typed option surface, deliberately narrower than ssh's so `-G`, `-N`, `-n` and
 `-f` cannot fake a success or hang the install.
 
-`clipboard set` is the other. It prints an OSC 52 write into the caller's own pane through
+`clipboard set` is the second. It prints an OSC 52 write into the caller's own pane through
 `zmx print <ZMX_SESSION>`, run from the `zmx` beside the CLI, and never opens the socket. The socket still
 never writes a clipboard: the write arrives in the pane's bytes, so every attached terminal applies its own
 `clipboard-write` policy, and a session attached from another Mac gets the text on the Mac showing it.
@@ -207,7 +214,13 @@ overlay terminals, which have none, are refused, and a name `ZmxSupport.isDaemon
 pasteboard write. It also injects between two 4096-byte pty reads, where the program's own escape sequence
 may be unfinished: the OSC 52 still parses whole, and the interrupted sequence is cut short.
 
-`session wait` is not a third exemption but a client-side composite, like `overlay open --block`: it
+`server install` is the third, macOS-only. It installs the agterm-server release matching the app over ssh
+and a download, and opens no socket. `ServerInstall` in `agtermCore` owns the asset naming, the checksum
+rules and the argv on `TerminfoInstall`'s connection surface; `ServerInstaller` in the CLI runs the steps
+over injectable effects, and no archive bytes are sent to the host until the tarball's sha256 matches the app's
+`agterm-server.sha256`. A bad destination is refused in `run`, not `validate`, so every refusal exits 1.
+
+`session wait` is not a fourth exemption but a client-side composite, like `overlay open --block`: it
 opens the socket only for existing reads (`events.read`, `window.list`, `tree`), so there is no
 `session.wait` command and nothing new to read back. It cannot be a server command: the inline accept loop
 would hold the very status writes it waits for. It anchors the cursor BEFORE reading the tree, so a status
@@ -340,8 +353,10 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   renders even in every toolbar mode. Only a drag captures the live divider; `session.resize`, the
   double-click reset and the first-layout seed set the value directly. A shown split therefore always
   reports a ratio, so absence means no split or one never shown, never "at the default".
-- `session.go --to next|prev|first|last|next-attention|prev-attention` operates on current selection in
-  the placement store, wraps within filtered scope, and returns selected ID. It has no target. The
+- `session.go --to next|prev|first|last|next-attention|prev-attention|N` operates on current selection in
+  the placement store, wraps within filtered scope, and returns selected ID. It has no target.
+  `N` is a 1-based place in `navigableSessions`, so a collapsed workspace's sessions count; past the end
+  is `AppStore.navigationError`, never a wrap. The
   attention steps include `active` while the window's `attentionIncludesActive` tree field is true.
   They never cross windows; `attentionNavigationAcrossWindows` in the tree describes GUI navigation only.
 - `notify` requires body, defaults title and session, skips OSC focus suppression, increments unseen, and
@@ -356,10 +371,10 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   - `--after`/`--before` anchor, which supplies workspace and insertion index.
   Reject both anchors, placement plus workspace, name plus ID, create without name, and missing name without
   create. Insert indices are clamped.
-- `--command` becomes raw libghostty `config.command`, not shell input. Ghostty quote-splits into argv and
-  executes directly, so operators, expansion, redirection, and globs require an explicit `sh -c` or
-  `zsh -lc`. GUI launch PATH lacks `/opt/homebrew/bin`; missing binaries exit 127, so use absolute paths
-  or a login shell.
+- Outside Live sessions `--command` becomes raw libghostty `config.command`, which on macOS runs under
+  `login` as `/bin/bash --noprofile --norc -c "exec -l <command>"` (`Exec.zig` at `GHOSTTY_REV`). Quotes,
+  expansion, redirection, pipes, and globs work; wrap a command list in `sh -c` or `zsh -lc`. GUI launch PATH lacks
+  `/opt/homebrew/bin`; missing binaries exit 127, so use absolute paths or a login shell.
 - `initialCommand` persists and reruns only when restored-command support is enabled; fresh sessions always
   run it. Captured foreground takes precedence. Promoting a split survivor clears the exited pane's initial
   command.
@@ -382,7 +397,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   `agtermctl` through `RemoteSession.controlCommand`, whose outer quoting every login shell reads alike, polls the
   origin's `zmx tree` until the new id is attachable, then attaches it under the row through `attach(_:placement:)`.
   Creation is never retried or done locally; a created but unattached companion is named in the error. The three
-  companion commands are in `waitsOnNetwork`, local ones included.
+  creation commands are in `waitsOnNetwork`, local ones included; `session.companion.convert` is local only and is not.
 - A remote parent's page companion is the origin's page. `session.companion.page.attach` hands out one view: a
   per-claim token in `companionPageTokens`, claimed through `claimPageServe` into a `PageServeStream` in companion mode,
   keyed by claim in `companionPageStreams`. A claim, an expired token, an unanswered reply or EOF ends only that view,
@@ -390,12 +405,17 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   soft-closed page keeps serving through undo. URL pages get the same channel for lifetime only (no bridge), and a
   loopback URL is refused at both ends. `zmx tree` lists a page companion with no panes when its parent is listed; the
   Attach Remote picker hides those rows, and `zmx attach` places one only under the single row bound to its parent.
+  A top-level page is a group root: listed with no panes and its `companions`, offered by the picker, and attached by
+  `zmx attach` or `zmx.attach.group` as a top-level replica row (`addReplicaPageRoot`) in the destination's current
+  workspace, rechecked after the ssh wait. Its binding carries the origin's host, endpoint and name with an empty
+  daemon map; `attachedParentRows` matches a later companion on its session id and endpoint.
   A terminal companion attached alone joins that row the same way (`attachedParentRows`), in the row's own workspace,
   and stands alone when no row or several match.
-  The viewer row binds the origin page session so New Companion on it makes a sibling there. `HtmlReplicaLink`
+  The viewer row binds the origin page session, so New Companion on a page companion's row makes a sibling there
+  and on a page root's row a companion under that root. `HtmlReplicaLink`
   keeps the page's own reload and navigation on the viewer's copy; every other bridge request goes to the origin.
-  A channel ending while the viewer row is soft-closed finalizes that row alone (`finalizePendingClose(ofSession:)`),
-  so Undo never restores a view of a page that ended.
+  A channel ending while the viewer row is soft-closed finalizes that row, and a page root's parked companions with it
+  (`finalizePendingClose(ofSession:)`), so Undo never restores a view of a page that ended.
 - A Live parent respawned on its origin carries its viewers across. `handlePaneExit` reads the daemon's cached leader
   before `closePrimaryPane` respawns, `ControlServer.ownerRespawned` waits for a different live leader under the same
   name, then counts the respawn in `respawnGenerations` and publishes `pane.respawn`; the snapshot carries every count
@@ -414,6 +434,11 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   `WindowLibrary.recentClosedItemLacksParent` says so; other restore failures keep their own error.
 - A page companion is created by its own wire command, `session.companion.page`, for the same older-app
   reason as `session.companion.new`; it never touches the parent's own overlay slot.
+- `session.page` creates a top-level page session, its own wire command for the same reason, with the CLI
+  too-old text `the running app is too old for page sessions`. `AppStore.addPageSession` places it after the
+  anchor's whole group with the anchor's local focused cwd (`--cwd` stays the file grant) and shares `addPage`,
+  open and refusal included, with `addPageCompanion`. A remote anchor only places it; creation is never
+  forwarded. The reply is `id` and `pageID`; the read-back is `content: "page"` with no `parent`.
 - `session.companion.duplicate` is its own wire command for the same older-app reason.
   `ControlServer.duplicateCompanion` plans every pane through `ForegroundProcess.replayObservation` and host-free
   `DuplicateReplay` from one fresh leader listing before creating anything; `AppStore.duplicateAsCompanion` then
@@ -426,15 +451,25 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   under the bare name), or its directory, launched unresolved, since the image alone turns `vimdiff` into plain vim.
   macOS withholds a platform binary's environment, so with no PATH read the system directories are searched and
   the image is the fallback. A bare name whose image is gone, as after an upgrade removed it, starts its own PATH's
-  first executable entry, and with no PATH read it is refused. Otherwise nothing executable refuses the pane; the restart checks see the path and image. An argument with a backslash is refused: libghostty's split and fish's Live
+  first executable entry, and with no PATH read it is refused. Otherwise nothing executable refuses the pane; the restart checks see the path and image. An argument with a backslash is refused: libghostty's bash and fish's Live
   `eval` read it differently. Only a `foregroundShell` becomes a plain shell; a daemon-leader shell program is refused.
+- `session.companion.convert` is its own wire command for the same older-app reason, with a CLI too-old text of its
+  own. `AppStore.convertToCompanion` is the one seam the GUI and control share: a fresh `addSession` at the target's
+  slot, then the target and its companions re-pointed at it, keeping every `Session` object. `ConvertRefusal.message`
+  is the refusal text both surfaces show, and a remote row is refused, never forwarded to its origin.
 - `ControlServer.pageCompanionRefusal` is the one pre-dispatch guard, covering the socket and a page's bridge.
   It judges `surface.zoom`/`surface.cursor` only for an explicit target, since their `active` means the
   window's zoom target, and never refuses a zoom hide, which stays idempotent.
 - `AppStore.closeOverlay` on a page session closes the session before slot teardown; the strip X and ⌘W go
   through `AppActions.closeSession`, so they keep the close confirmation and the grace-period undo.
-- `Session.content` is a `let` set at init, so the first save already excludes the row
-  (`isPersistable`, `locallyManagedPaneIdentities`).
+- A local page row is saved with a `PageSnapshot` (file or URL, its options) once its page is placed, so the
+  save inside `addSession` leaves it out and `addPageCompanion` saves after the open; a replica row never is.
+  It writes no pane identity, and `persistedClaims` and `PaneIdentityInventory.upgrade` skip it as
+  `locallyManagedPaneIdentities` does. `openRestoredPages` reopens it after its group is placed, in every
+  restart mode and on a Recent Closed reopen, with no source check: a failed load is the row's failed state.
+- A saved `page` key that does not decode, in any shape, restores as `HtmlSource.unreadable`: a page row in the
+  failed state with no pane identity, saved back as `{"unreadable": reason}`, never shared with another Mac.
+  An absent or null page value restores a terminal.
 
 ## Surface input, output, and search
 
@@ -736,6 +771,26 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   one the refusal opened (`remoteLinkRefusalHuds`), since nothing would show it again. ⌘⌥ refuses before anything is
   sent. The click is a
   gesture with no control command: its page reads back as the replica page on the session node.
+- Session links use `LinkPolicy.sessionLink`: exactly `agterm://session/` (case-insensitive prefix) plus a
+  36-character hyphenated UUID (either case), with no suffix, query, fragment, credentials, port or encoding.
+  The raw string is checked, not URL components, so even an empty port is refused.
+  The `.selectSession` route precedes remote forwarding in every link-open mode, from pane, remote pane and
+  scratch only; quick terminal and program overlay clicks are ignored, as for the link-open overlay.
+  `WindowLibrary.sessionLinkTarget` takes the namespace from the clicked pane's binding: local shells use local
+  ids, mapped remote panes and catalog-owned scratches use the origin host and endpoint, and local splits use
+  local ids; a scratch on any other row uses local ids.
+  A remote pane click with no binding or no clicked pane, a mapped pane whose binding has no origin endpoint,
+  and ambiguous origin matches select nothing.
+  `Session.showsOriginSession`, shared with `attachedParentRows`, matches that origin identity.
+  A catalog row that arrived already ended has no origin, so the link alone also matches it on host and session id.
+  A scratch-only catalog row takes its origin from its scratch, without making it a reattachable pane.
+  `followSessionLink` uses gated `raiseAndSelect`: unknown or closed rows, zoom, dashboard and pending pickers
+  refuse; otherwise it raises the window and selects normally, focusing without an attention reveal or confirmation.
+  ⌘⌥ does nothing; ⌘⇧ selects like ⌘.
+  Both forwarded-click receivers refuse `.selectSession` with `.notAPage`; neither selects on the origin.
+  There is no control twin: `session select` and `window select` already cover selection, read back through
+  the existing selected/frontmost tree fields.
+  HUD links are deferred because a mirrored HUD carries no origin; their disposition stays ignored.
 - libghostty keeps a `:line[:column]` suffix in the path it hands over and resolves a relative path only when that
   exact path exists, so `./main.go:42` arrives raw. `LinkPolicy.locations` lists the candidates for such a link, the
   literal path first so a file named with a colon wins, then the path without the suffix. libghostty keeps a sentence's
@@ -775,9 +830,17 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   `MarkdownPage.imageReferences` contains in the file's folder after resolving symlinks, each canonical file once
   (`MarkdownPage.Embedded`), within a total byte and pixel budget. The renderer, bundled markdown-it and
   highlight.js plus `render.js` (`MarkdownAssets`), runs as a user script in its own content world with page
-  JavaScript off; its image rule emits only app-embedded data URIs, so no authored source reaches WebKit, and it
-  strips every link but http(s) and fragments, since `about:` passes the navigation policy. The click and the
-  control path check only the descriptor; the page load reads pictures, under the shared `textLoad` counter.
+  JavaScript off; its image rule emits only app-embedded data URIs, so no authored source reaches WebKit, and on a
+  page without a link grant it strips every link but http(s) and fragments, since `about:` passes the navigation
+  policy. The click and the control path check only the descriptor; a page without a grant reads pictures at load,
+  under the shared `textLoad` counter, and a link page reads each document through its scheme source instead.
+- A markdown page with `--navigation` carries `HtmlOverlay.markdownLinks`, a `MarkdownLinkGrant` (canonical file and
+  folder) computed by the app at open, nil when that folder is `/` or home, which also drops navigation. A clicked
+  `.md` always asks for it. Render.js then keeps relative `.md`/`.markdown` hrefs, and the page loads through
+  `HtmlPageSchemeHandler` at `agterm-page://<page-id>/<path>`, so WebKit owns history and scroll. The policy allows
+  only that page's own host with a markdown path lexically inside the root; `MarkdownPageSource.linkSource` judges
+  every read again with `MarkdownPage.linkedDocument` and reads at the normalized request, so pictures and links share
+  one base. A link that fails after the first commit keeps the shown page `loaded` with no error.
 - A text page (`HtmlSource.text`, `--text` with `--line`, wire `textFile` and `line`) is built from text too and
   themed, but has no links at all: its arm of `HtmlNavigationPolicy` runs before the shared new-window and `about`
   exits and allows only a main-frame `about:blank`. `TextProbe` reads through `BoundedFile` and refuses invalid UTF-8
@@ -827,6 +890,14 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   Under the cap `data-files` carries `TextPage.diffLanguages`, and the page highlights each hunk's two sides whole in
   its file's language, with the marker column kept in the text at zero width; added and removed runs get bands at
   any size. A patch with no unified hunk keeps the `diff` grammar. `text.language` stays `diff`.
+- A text page wraps long lines (`session.overlay.wrap on|off|toggle`, the bar's Wrap button, `w`).
+  `HtmlOverlay.textWrap` lives per page, starts off and is never persisted; a rebuild carries it as `data-wrap`.
+  The bridge records the page's toggle in the model, and `TextPageBridge.apply` pushes every model change back, so a control
+  call crossing a click leaves both on the model's value. Refusals are `textSearchPage`'s; a replica's
+  toggle stays in the page, unrecorded, unreported and dropped by a rebuild, as its search is. Every row is one line box of the same height, so `text.js` places line starts from each line's ending
+  newline and the end from the code element's last fragment: a diff marker's zero-size rect is empty. The gutter,
+  target, diff and change bands all read those rows. A toggle reports a log page's offset, which a rebuild reopens at.
+  Read back `htmlOverlays[].text.wrap`, omitted while unwrapped.
 - `browser.clear` removes all website data from the saved store and keeps its id. App-global: a target or
   `--window` is refused. It answers ok without creating anything when no profile exists, and replies only
   after WebKit reports the removal done. It is refused with `N persistent page(s) still open` while any
@@ -859,8 +930,12 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   nothing enables it later. User scripts and native `evaluateJavaScript` still run, so the theme survives,
   and a test cannot use evaluation to show page script ran; tests that need page script open with it on.
 - A page's `window.close()` closes its overlay: `HtmlOverlayPage.webViewDidClose` calls `closeHtmlOverlay`,
-  so the outcome is `dismissed`. A URL page can thereby dismiss its overlay without a prompt, and `--js`
-  is the only gate. The callback names no frame, so a same-origin subframe's `top.close()` closes the
+  so the outcome is `dismissed`. On a page row it calls `HtmlOverlayRegistry.closePageSession` instead, which
+  `ControlServer` sets to `AppActions.closePageSession`, since the row can hold terminal companions. Only a
+  picker pending in the page's own window refuses it; the page keeps the request and `retryPageCloses` runs it
+  when that picker resolves. An accepted request is spent, so an Undo remount or a cancelled confirmation does
+  not close again.
+  A URL page can thereby dismiss an overlay without a prompt, and `--js` is the only gate. The callback names no frame, so a same-origin subframe's `top.close()` closes the
   overlay too, unlike a bridge request. WebKit may refuse the call, as it does after `history.pushState`.
   The close is deferred one task because releasing the page clears the delegate WebKit is calling through.
   A session in an undoable close has no slot to find, so the page keeps the request and `apply` finishes
@@ -1261,6 +1336,8 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 
 - `session.status` accepts idle/active/completed/blocked, blink, auto-reset, optional sound, `#rrggbb`
   color, fixed shape set, and pane. Build a fresh ephemeral indicator so omitted overrides clear.
+  `ifIdle` makes a write on a non-idle row `StatusWriteResult.skipped`: ok, no change, stamp, event or sound.
+  It is checked before pane precedence, so it never answers a refusal.
 - Validate sound before mutation and target playback. `default`/`beep` beeps; named system/custom sounds
   use cached `NSSound`. Without per-call sound, entering blocked may play configured default once;
   repeated blocked does not. Explicit per-call wins via `AgentStatus.effectiveSound`.
@@ -1515,7 +1592,11 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   The basename comes from `stripLoginDash(argv)[0]`, in that order: `basename` splits on `/`, so it drops the
   login mark from `-/bin/zsh` but keeps it on the bare `-zsh`.
 - `remoteHost` names the machine a teleported session is attached to and is omitted for a local one. It is
-  live-only: a remote session is never persisted, so it cannot survive a relaunch.
+  live-only: a remote row is never persisted, so a per-session attach is gone after a relaunch, while a remote
+  window rebuilds its rows from the server's catalog with both remote fields set.
+  `remoteSessionID`, on the node and on `remote.opened` / `remote.closed`, is the origin's id the row shows.
+  A remote window's row carries it too, equal to the row's own id; a re-attach hook skips those rows by their
+  window's `remote` node, since the window restores them itself.
 - `backedByZmx` on a session is true only when every existing primary/split pane is currently backed.
   Primary/split entries in `surfaces` report their own Boolean; scratch and overlays omit it. Older servers
   omit both levels. There is no sidebar indicator.
@@ -1523,8 +1604,9 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   disposition it attaches with once shown; otherwise `zmx tree` drops a session with a hidden split (#762).
 - `liveAttribution`/`splitLiveAttribution` report the observed responsibility attribution of a local Live
   pane's leader process, probed from `sessionLeaderPIDs`: `supervisor`, `app`, `orphaned` or `unknown`,
-  from `SessionHost.classify`. Omitted for a non-Live or remote pane; the split field covers a hidden
-  split. `windows.md` owns the host lifecycle behind them.
+  from `SessionHost.place`. Omitted for a non-Live or remote pane; the split field covers a hidden
+  split. `liveHostStale`/`splitLiveHostStale` are true for a `supervisor` pane whose host is not the current
+  key's, omitted otherwise. `windows.md` owns the host lifecycle behind them.
 - `realized` reports the MAIN pane's `TerminalSurface.isRealized`, populated host-free in
   `AppStore.controlTree` (no app closure — `isRealized` is on the protocol) and false for an empty slot, so
   only a server predating the field omits it. It exists because `session.new` answers `ok` for a model
@@ -1678,12 +1760,13 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   Live is not both the configured and the launched mode, when the listing failed, when the claim walk is
   incomplete or claims a pane twice, and when no pane is selected.
   `LiveReset.select` in agtermCore joins `paneClaims()` to the listing; the dialog counts distinct sessions
-  and the reply carries `result.liveReset` (sessions, panes, pending, and `outdated` sessions when any) plus
-  the dialog body as `text`.
-- A pane is selected for one of two reasons, carried on each marker target. `outdated`: its daemon's
+  and the reply carries `result.liveReset` (sessions, panes, pending, and `outdated` and `staleHost` sessions
+  when any) plus the dialog body as `text`.
+- A pane is selected for one of three reasons, carried on each marker target. `outdated`: its daemon's
   `created=` from `zmx list` is before the launch's `ZmxBuildRecord` cutoff, whatever its attribution, which
   is what reaches supervised panes still running a zmx from before an update. `unsupervised`: otherwise, an
-  orphaned or app-attributed leader. A pane that qualifies for both is recorded as `outdated`.
+  orphaned or app-attributed leader. `staleHost`: otherwise, a supervised leader whose host is from an earlier
+  helper build or login session. The first reason that applies is recorded.
 - `ZmxBuildRecord` is `zmx-build.json` in the state directory. The build phase copies `.zmx-build-stamp` into
   the bundle as `Resources/zmx/BUILD`; `restoredRuntime` compares it with the record before
   `LaunchOrchestration.run`, dates a different or missing id at the current whole second (zmx's `created`
@@ -1700,8 +1783,9 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   checked snapshot save succeeded, then spawns the relauncher; a relauncher that cannot start removes the
   marker. The next launch consumes the marker before any kill and only NARROWS it: a target is killed when
   it is still claimed, still listed with the same leader pid, and still qualifies for its reason (created
-  before the cutoff, or orphaned); gone restores normally; anything else is skipped. `consume` accepts marker
-  versions 1 and 2, and a version-1 target reads as `unsupervised`. Every selected leader is polled whatever the batched kill reported, and a
+  before the cutoff; orphaned; on an earlier host, or orphaned since that host ended); gone restores normally;
+  anything else is skipped. `consume` accepts marker versions 1 to 3, and a version-1 target reads as
+  `unsupervised`; version 3 added `staleHost`, so an older build discards such a marker. Every selected leader is polled whatever the batched kill reported, and a
   survivor's pane gets neither its replay nor its durable command at that launch.
   A confirmed reset arms and skips the quit alert only while Live is still both modes
   (`armablePending`): a mode change after confirmation leaves the next launch unable to suppress a
@@ -1758,13 +1842,14 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   are flat and carry `windowID`/`windowName` and `workspaceID`/`workspaceName`: show the names, group by
   the ids, because neither rename path nor `addWorkspace` enforces uniqueness, so two windows called
   `main` and a `dev` workspace in each are ordinary and name-grouping silently merges them.
-- A session is offered only when the store reports `backedByZmx` AND every pane resolves to a `claimed`
+- A terminal session is offered only when the store reports `backedByZmx` AND every pane resolves to a `claimed`
   daemon observed `running` under an agterm daemon name. A claimed daemon alone proves nothing: a
   requested-live launch that fell back preserves its daemons while showing fresh shells. An incomplete
   split is dropped whole, never offered half. These are ELIGIBILITY rules, not only a defence against a
   race, so losing the two network reads does not retire them: the zmx observation is still a subprocess
   snapshot taken beside the model walk. They now run on whichever side owns the sessions, which is the
-  far side for a remote call.
+  far side for a remote call. A page owns no daemon; the Companions section says which pages are listed, and a
+  row attached from another Mac (`remoteHost`) is never listed.
 - An empty candidate list is a SUCCESSFUL answer and deliberately does not distinguish "not running live"
   from "live with nothing eligible". `zmx list` is the restore-mode diagnostic; no surface may claim the
   empty list diagnoses the mode.
@@ -1910,7 +1995,8 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   gets it, and no kind claims the ssh connection's state: the held exit says the command ended, never why.
   The host Mac gets no event for an attach; a host-side pair would be `client.attached` / `client.detached`,
   never these kinds.
-- `Session.remoteHost` is immutable and set at construction, because `addSession` saves: a marker written
+- `Session.remoteHost` and `remoteSessionID` are immutable and set at construction, because `addSession` saves
+  and emits `remote.opened` before `bindRemote` runs: a marker written
   afterwards would let one snapshot reach disk carrying the ssh command. `isPersistable` gates every
   producer — the launch snapshot, the Recent Closed session record, and a closed workspace's record, whose
   `sessionCount` and `selectedSessionID` are recomputed after filtering. The in-memory pending-close record
@@ -1925,7 +2011,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   close would drop the local client while the daemon kept ssh connected with no UI showing it.
 - Presentation carries status, context, the info line, notifications, the HUD and the layout of attached panes. Such a program runs
   on the origin and reaches the origin's socket, so without a stream the viewer sees terminal bytes only.
-  Every attach opens one: the viewer runs `ssh -T <host> agtermctl zmx present <session>`, whose far end
+  Every terminal attach opens one; a page row has only its page channel. The viewer runs `ssh -T <host> agtermctl zmx present <session>`, whose far end
   bridges stdio to a `zmx.present` connection. The far-side `agtermctl` PATH precondition above applies.
 - The stream is newline-delimited JSON, `PresentationFrame` with `gen`, `rev` and a body. The hub registers
   a subscriber BEFORE it takes the snapshot and holds deltas until the snapshot is sent, so nothing falls
@@ -2056,13 +2142,19 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   cannot decode; without it the open keeps `OverlayHtmlError.presenter`. The origin still probes at open and sends
   an image's oriented pixel size (`ImagePixels`); an auto-sized image carries no origin-computed points, the
   presenter sizing it through `ControlServer.imagePoints`, while explicit sizing passes through as for any page. Over the same channel, `RemotePageResources.content` serves an image or text page
-  its own file and a markdown page its own file plus pictures its folder contains after resolving symlinks there,
-  each read whole through `BoundedFile` under its kind's cap, a picture sent only when its bytes carry a picture
+  its own file and a markdown page its own file plus pictures its folder contains after resolving symlinks there
+  (with a link grant: markdown-spelled requests only through `linkedDocument`, the original included, and pictures
+  anywhere in the grant's root), each read whole through `BoundedFile` under its kind's cap, a picture sent only when its bytes carry a picture
   signature; the bridge is refused. The presenter holds it as `HtmlSource.replica(path:content:)`, an origin path
   no local read ever takes, judges the fetched bytes with the local probes, lists markdown pictures lexically
   (`MarkdownPage.remoteImageReferences`) and builds the page off the main actor. Limit: an inward symlink alias
   is a second file there, so aliases count separately toward the picture budgets and one can fall to alt text
-  sooner than locally. A markdown or text page companion of a remote parent stays refused.
+  sooner than locally. A link page's origin serves pictures anywhere in the grant's root, where a local page embeds
+  only those inside each document's own folder, so a picture symlinked out of its subfolder shows remotely and
+  falls to alt text locally. The grant rides `PresentationPage.markdownLinks` only to a presenter listing
+  `PresentationHub.pageLinksKind`; any other gets `HtmlOverlay.withoutLinks()` in the request and in the record the
+  claim serves from, since an older presenter would fetch the original spelling and `.md` pictures. A markdown or
+  text page companion of a remote parent stays refused.
 - On the origin, `overlay.close` sends `pageClose` and ends the reservation at once; `resize`,
   `reload [--current]`, `navigate back|forward` and hide/show/toggle reach the presenter as `pageCommand`s,
   each reply meaning requested, not applied. `navigate browser` reaches it
@@ -2091,6 +2183,47 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 - XCUITest exemption: `zmx.present` needs a second app as its peer, and its effects on a viewer are the
   existing status, context, notification, HUD and pane paths those suites already cover. `ControlServerRemotePresentationTests`
   runs both roles in one process over the real bridge binary instead.
+## agterm-server and remote windows
+
+`site/docs.html#remote-server` owns the user contract and `site/commands.html#remote` the commands.
+
+- agterm-server (`AgtermServerKit`, product `agterm-server`) keeps a windowless `AppStore` on Linux.
+  Every pane is a zmx daemon in a systemd user scope of its own, so a server restart or crash keeps it.
+- `ServerCommandPolicy.served` is default-deny: a protocol command reaches the server's store only once it
+  is listed there, and `HeadlessCommandPolicy` gives the physical-window reason for the rest.
+- The Linux rendezvous is `ControlResolve.defaultStateDirectory`: `$XDG_STATE_HOME/agterm` (absolute only)
+  or `~/.local/state/agterm`, so a bare `agtermctl` over ssh finds the socket. zmx sockets live under
+  `XDG_RUNTIME_DIR`, and the server refuses to start without one (`ServerConfiguration`).
+- `catalog.subscribe` hands its descriptor to a stream like `zmx.present`: a hello with `CatalogVersions`,
+  a snapshot carrying `epoch`, `rev` and `catalogID`, then diffs (`CatalogHub`, `CatalogDiff`).
+  A snapshot clears an applied receipt once it reaches that receipt's epoch and revision
+  (`RemoteCatalogActions.catalogMoved`); it never settles a lost reply.
+- A structural command with `opID` and `epoch` answers `CatalogReceipt` (`ServerActions+Receipts`) and runs
+  once while its receipt is among the 512 the table keeps (`CatalogOperationTable.capacity`); another epoch is
+  refused. `--expect-panes` and `--expect-scratch` refuse it
+  when the target changed under it. `catalog.op` reads the table and fences an id it does not hold, so
+  the command arriving later is refused. The remote window never resends: a lost reply becomes `unknown`,
+  settled through `catalog.op` or dropped once its target leaves the catalog.
+- Asks, picks, pages and overlay jobs on the server wait unpresented until a presenter that can show them
+  takes the session (`AppStore+Interactions`, `ServerStreams`). Only ask and pick take `--timeout`
+  (`armDeadline`); a page or job's claim window starts when it is offered, a claimed job is never
+  relaunched, and a restart forgets everything still waiting.
+- A viewer tells a headless origin from a Mac by `RemoteBinding.originHeadless`, from `zmx.tree`'s
+  `headless`. Only for such a row does a GUI ask for an offscreen row wait hidden and a busy window queue a
+  pick. `version` reports `headless`, and the CLI binds an untargeted pick to `AGTERM_SESSION_ID` only then.
+- A remote window's store is filled by `RemoteCatalogMirror` from `RemoteCatalogClient`'s stream, over
+  `SshConnectionPool` masters of at most eight channels each, below stock sshd's `MaxSessions 10`.
+  A pane joined to a master ignores its own ServerAlive options, so the master runs the pane attach's
+  `RemoteSession.keepAliveCheck` itself; without it a half-open link keeps passing `ssh -O check`. The
+  standalone `RemoteSession.forwardCommand` runs it too, or its forward outlives the link with the page's port dead.
+  Structural actions go to the server through `RemoteCatalogActions` and are disabled while disconnected,
+  never queued; `RemoteWindowViewState` keeps what this Mac detached and its kept views.
+- A loopback URL page on the server opens through `PooledForward` on the row's ssh master, or a standalone
+  `RemotePortForward`, only for a presenter listing `PresentationHub.pageForwardKind`.
+- Under musl every `ServerProcess` spawn re-execs the server as `CleanExec`, which closes inherited
+  descriptors in the single-threaded child: musl has no closefrom file action, and Foundation opens files
+  without `O_CLOEXEC`.
+
 ## Pane lead
 
 - zmx keeps one leader per daemon and applies only its grid. Stock zmx moves the lead to whichever client
