@@ -247,12 +247,14 @@ final class ControlServerTests: XCTestCase {
         early.isInverted = true
         let replied = expectation(description: "reply written")
         let reply = OSAllocatedUnfairLock<String?>(initialState: nil)
-        Thread {
+        // explicit @Sendable: Swift 6.2.4 infers @MainActor here, and the worker thread trips the executor assertion
+        let client: @Sendable () -> Void = {
             let line = Self.roundTrip(#"{"cmd":"browser.clear"}"#, at: path)
             reply.withLock { $0 = line }
             early.fulfill()
             replied.fulfill()
-        }.start()
+        }
+        Thread(block: client).start()
 
         await fulfillment(of: [started], timeout: 5)
         await fulfillment(of: [early], timeout: 1)
@@ -468,7 +470,8 @@ final class ControlServerTests: XCTestCase {
     private func send(_ line: String) async -> String? {
         let path = socketPath!
         return await withCheckedContinuation { continuation in
-            Thread { continuation.resume(returning: Self.roundTrip(line, at: path, limit: 1 << 20)) }.start()
+            let client: @Sendable () -> Void = { continuation.resume(returning: Self.roundTrip(line, at: path, limit: 1 << 20)) }
+            Thread(block: client).start()
         }
     }
 
