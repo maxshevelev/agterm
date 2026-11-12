@@ -111,6 +111,38 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   contended main actor did not fit in 8 s. The log cannot tell them apart.
 - **Fix.** The wait is 60 s, and `#expect(!session.ended)` makes a repeat of (a) name itself.
 
+### `SshConnectionPoolTests` cases waiting in `held()` on Linux
+
+- **Symptom.** `Expectation failed: await held()` in `callersArrivingDuringAStartShareIt`,
+  `closingDuringACheckStartsNothing`, `aConnectionThatFinishesStartingAfterCloseIsEndedAtOnce` and
+  `aPooledStreamOpensOnceItsConnectionAnswersAndKeepsWhatWasSentMeanwhile`, all 29 s after they started.
+- **Runs.** Job 131405859872 (run 43281980528).
+- **Cause, demonstrated.** `held()` gave the stub runner 5 s of wall-clock time to park. Every Linux run starts with
+  a scheduling stall in which trivial `@MainActor` tests report 22 to 33 s, passing runs included, so the deadline
+  could expire before the stub runner parked.
+- **Evidence.** Reproduced in `swift:6.3.2-noble` pinned to 4 CPUs (aarch64, CI is x86_64), unprivileged, full
+  suite with zmx. A trivial `ControlEventRingTests` case was reported started at +1.7 s, entered its body at
+  +20.5 s and ran in microseconds. A nonisolated probe reached the main actor in 0.7 s, but its continuation
+  after `MainActor.run` resumed 14.2 s later. Inside the stall a main-actor 5 ms `Task.sleep` woke after 16.7 s
+  and a `Task.yield` after 5.5 s; afterwards both took milliseconds. The CPUs were saturated until about 14 s.
+  A backtrace at 12 s showed concurrency worker threads held by synchronous test waits: six in
+  `HudHelperTests.Run.waitForExit` (`Thread.sleep`) and one in `OverlayRunJobTests.FakeOrigin.frames`
+  (`DispatchSemaphore.wait`). Skipping those two suites shortened the stall without removing it; one run per
+  configuration was too noisy to size their share. The stall's full cause is not established: neither the worker
+  count nor the number of queued tasks was measured.
+- **Fix.** `held()` gives up after 1000 `Task.yield` retries instead of a deadline, so a stall slows it but cannot
+  expire it. The startup stall itself remains.
+
+### `ServerStreamsTests.twoViewsAreServedAtOnceAndBridgeRequestsRunOnTheServer`
+
+- **Symptom.** `no bridge replies: nil, Optional(...reply...)`: the first view's `session.rename` got no reply while
+  the second view's answered.
+- **Runs.** Job 131486876585 (run 43305271745), where every test in the process finished at about 62 s.
+- **Cause, demonstrated.** `LogClient` read each frame with a 10 s `SO_RCVTIMEO`, and a bridge reply needs a main
+  actor hop that thousands of parallel tests share on the runner. Holding the main actor 11 s during the rename
+  reproduces the message locally.
+- **Fix.** `LogClient` waits 60 s, as `Viewer` and `eventually` do; the same 11 s hold then passes.
+
 ### Linux test process killed by SIGPIPE
 
 - **Symptom.** The Linux core tests job ends with signal 13 about 6 s after `swift test` starts, before any test
@@ -178,6 +210,29 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   startup, rendering and polling, and no stage was measured on the runner.
 - **Fix.** The per-file bound and the page wait are 30 s, a coarse end-to-end ceiling for a pathological slowdown
   rather than a latency target.
+
+### `ControlServerRemotePageTests.testATextActionOnAPageThatIsNotTextAnswersTheLocalRefusalAndAdvancesNoSequence`
+
+- **Symptom.** `XCTAssertEqual failed: ("5") is not equal to ("1")` on the state frame count.
+- **Runs.** 43224720127 (PR #978); 43230065480 failed the first fix, `the page load fails not reached within 10.0s`.
+- **Cause, demonstrated.** The page was a URL on the restricted port 9. Its own load reports (loading, loading,
+  failed `Not allowed to use restricted network port`, all at sequence 5) arrived after the baseline count;
+  reproduced locally with the frames printed. The refused text actions sent none. Waiting for the failed load
+  did not hold on the runner, where that load never reported `failed` within 10 s.
+- **Fix.** The test shows an HTML file page through the fixture's channel, which needs no network, and waits for
+  a report with the hide's sequence and `loaded` before it takes the baseline.
+
+### `ControlServerRemotePageTests.testTextCommandsOnAReplicaAnswerAsLocallyAndReachTheOrigin`
+
+- **Symptom.** `XCTAssertEqual failed: ("nil") is not equal to ("Optional("1 of 1")")`, then `the origin is told`
+  times out.
+- **Runs.** Local only, once in about 70 class runs.
+- **Cause, demonstrated.** `text.js` posted a diff page's first changes report, and a seeded search's first
+  report, before `ready`. A caller waiting for `textChanges` could step between the two messages while
+  `TextPageBridge` still held its document pending, which answers `page not loaded`. A script polling `tree`
+  for `text.changes` had the same window.
+- **Fix.** The page holds the counts it reports during setup and sends them after `ready`.
+  `TextPageRenderingTests` pins the message order for a diff with changes, one without, and a seeded search.
 
 ### Three earlier hosted failures, already fixed on master
 
