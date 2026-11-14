@@ -173,6 +173,42 @@ final class RemoteCatalogMirrorTests {
         #expect(effects.added == [page.id])
     }
 
+    @Test func anUnnamedRowFollowsItsTitleAndANamedOneKeepsItsName() throws {
+        var unnamed = session(name: "srv", panes: [pane()])
+        unnamed.fields.customName = ""
+        var named = session(name: "build", panes: [pane()])
+        named.fields.customName = "build"
+        _ = open([unnamed, named])
+        let unnamedRow = try #require(store.session(withID: unnamed.id))
+        let namedRow = try #require(store.session(withID: named.id))
+
+        unnamedRow.oscTitle = "omp"
+        namedRow.oscTitle = "omp"
+
+        #expect(unnamedRow.customName == nil)
+        #expect(unnamedRow.displayName == "omp")
+        #expect(namedRow.displayName == "build")
+    }
+
+    @Test func aRowFromAServerWithoutCustomNameKeepsTheCatalogNameOverItsTitle() throws {
+        let legacy = session(name: "srv", panes: [pane()])
+        _ = open([legacy])
+        let row = try #require(store.session(withID: legacy.id))
+
+        row.oscTitle = "omp"
+
+        #expect(row.displayName == "srv")
+    }
+
+    @Test func aPageRowKeepsItsCatalogLabelBesideAnEmptyCustomName() throws {
+        var page = pageRow()
+        page.fields.customName = ""
+
+        _ = open([page])
+
+        #expect(try #require(store.session(withID: page.id)).customName == "docs")
+    }
+
     @Test func aPageRowKeepsItsShownPageThroughARenameAndAReorderAndLeavesWithItsRemoval() throws {
         let page = pageRow()
         let other = session(panes: [pane()])
@@ -685,6 +721,67 @@ final class RemoteCatalogMirrorTests {
         fields.scratch = scratch.map { CatalogScratch(pane: $0, shown: shown) }
         if ended { fields.lifecycle = .ended }
         return fields
+    }
+
+    private func node(_ id: UUID) -> ControlSessionNode? {
+        store.controlTree().workspaces.flatMap(\.sessions).first { $0.id == id.uuidString }
+    }
+
+    private func counted(_ pane: CatalogPane, _ count: Int?) -> CatalogPane {
+        var pane = pane
+        pane.pendingMessages = count
+        return pane
+    }
+
+    @Test func aRowReadsBackItsServersMailCountsWithNoReattachAndDropsThemAtZero() throws {
+        let left = pane(), right = pane(), scratch = scratchPane()
+        var entry = session(panes: [left, right])
+        entry.fields = withScratch(entry, scratch, shown: false)
+        _ = open([entry])
+        let row = try #require(store.session(withID: entry.id))
+        let attaches = effects.needsAttach
+        var fields = entry.fields
+        fields.scratch?.pane.pendingMessages = 4
+
+        delta(1, .paneChanged(counted(left, 2), session: entry.id))
+        delta(2, .paneChanged(counted(right, 1), session: entry.id))
+        delta(3, .sessionChanged(fields))
+        let unrealized = node(entry.id)
+        let surface = Surface()
+        surface.paneToken = scratch.identity.uuidString
+        row.scratchSurface = surface
+        let realized = node(entry.id)
+        delta(4, .paneChanged(counted(left, nil), session: entry.id))
+        fields.scratch?.pane.pendingMessages = nil
+        delta(5, .sessionChanged(fields))
+
+        for loaded in [unrealized, realized] {
+            #expect(loaded?.surfaces?.first { $0.kind == "left" }?.pendingMessages == 2)
+            #expect(loaded?.surfaces?.first { $0.kind == "right" }?.pendingMessages == 1)
+            #expect(loaded?.scratchPaneID == scratch.identity.uuidString)
+            #expect(loaded?.scratchPendingMessages == 4)
+        }
+        #expect(node(entry.id)?.surfaces?.first { $0.kind == "left" }?.pendingMessages == nil)
+        #expect(node(entry.id)?.scratchPendingMessages == nil)
+        #expect(effects.needsAttach == attaches)
+        #expect(!surface.tornDown)
+        #expect(row.scratchSurface === surface)
+    }
+
+    @Test func aReplacedScratchDropsTheOldCountAndAnEndedRowsScratchKeepsCounting() throws {
+        let old = scratchPane(), new = scratchPane()
+        let entry = session(panes: [pane()])
+        _ = open([entry])
+        delta(1, .sessionChanged(withScratch(entry, counted(old, 2))))
+
+        delta(2, .sessionChanged(withScratch(entry, new)))
+        let replaced = node(entry.id)
+        delta(3, .sessionChanged(withScratch(entry, counted(new, 3), ended: true)))
+
+        #expect(replaced?.scratchPaneID == new.identity.uuidString)
+        #expect(replaced?.scratchPendingMessages == nil)
+        #expect(node(entry.id)?.ended == true)
+        #expect(node(entry.id)?.scratchPendingMessages == 3)
     }
 
     @Test func aShownServerScratchAttachesItsDaemonOnTheRow() throws {

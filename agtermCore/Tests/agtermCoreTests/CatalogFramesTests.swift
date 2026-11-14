@@ -91,6 +91,30 @@ struct CatalogFramesTests {
         #expect(try JSONDecoder().decode(CatalogSessionFields.self, from: encoded).page == nil)
     }
 
+    @Test func aPanesMailCountIsOmittedAtNoneAndAnOlderServersPaneDecodesWithout() throws {
+        let endpoint = ControlZmxEndpoint(executable: "/srv/zmx", socketDirectory: "/run/zmx")
+        var counted = CatalogPane(identity: UUID(), daemon: "d", endpoint: endpoint)
+        let plain = try JSONEncoder().encode(counted)
+        counted.pendingMessages = 3
+
+        #expect(!String(decoding: plain, as: UTF8.self).contains("pendingMessages"))
+        #expect(try JSONDecoder().decode(CatalogPane.self, from: plain).pendingMessages == nil)
+        #expect(try JSONDecoder().decode(CatalogPane.self, from: JSONEncoder().encode(counted)).pendingMessages == 3)
+    }
+
+    @Test func anEmptyCustomNameTravelsAsEmptyAndAnOlderServerOmitsIt() throws {
+        var unnamed = CatalogFixture.session().fields
+        unnamed.customName = ""
+        let legacy = CatalogFixture.session().fields
+
+        let decoded = try JSONDecoder().decode(CatalogSessionFields.self, from: JSONEncoder().encode(unnamed))
+        let encodedLegacy = try JSONEncoder().encode(legacy)
+
+        #expect(decoded.customName == "")
+        #expect(!String(decoding: encodedLegacy, as: UTF8.self).contains("customName"))
+        #expect(try JSONDecoder().decode(CatalogSessionFields.self, from: encodedLegacy).customName == nil)
+    }
+
     @Test func versionsTravelWithTheProtocolKeyword() throws {
         let json = String(decoding: try JSONEncoder().encode(CatalogFixture.versions), as: UTF8.self)
 

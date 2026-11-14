@@ -1459,7 +1459,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   whole command; only `.unresolved` becomes a per-recipient `unknown pane` rejection.
 - A live pane is a realized surface with a parseable token, the one definition recipients, identities and
   `--all` share; a split hidden since launch has none. `ControlServer+Messages` resolves the session across
-  every open store with `window: nil`, never the frontmost default, then asks `AppStore.messageRecipient`.
+  every open store with `window: nil`, never the frontmost default, then asks `AppStore.messagePane`.
 - An identity is `SESSION:PANE-ID` only and must be a live pane of that session, on send, read and ack alike.
   There is no fallback to a role or the active pane, and a stale or incomplete identity never becomes an
   anonymous send: the CLI sends without one only when neither `AGTERM_*` variable is present.
@@ -1474,6 +1474,18 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 - `read --ack` removes its batch in one synchronous mailbox operation and answers `acked`. The CLI refuses to
   print unless `acked` names exactly the returned ids, and `--wait` repeats that same read rather than probing
   first, since a probe leaves a gap in which another reader drains the mailbox.
+- agterm-server hosts its own bus. A headless store's live pane is a daemon-backed main or split identity or
+  the `scratchDaemon`, so an ended row keeps only its scratch, and `markSessionEnded` is one more disposal site.
+  A Mac remote row is refused by name: `MessagePaneError.detail` becomes `MessageRejection.detail`
+  (`remote session`), a field rather than a new `Reason`, since a client decodes the whole reply.
+  Local-to-server messaging is `docs/backlog/local-to-server-messaging.md`.
+- Server mail reaches a Mac two ways. Counts ride `CatalogPane.pendingMessages` into `Session.catalogMail`,
+  rebuilt from each catalog entry and never part of the binding, so a count change attaches nothing; a server
+  scratch reads back on the session (`scratchPaneID`, `scratchPendingMessages`), since the `surfaces[]` entry
+  is a zoom address the server's scratch lacks. Each delivered pane is a `message` presentation frame to every
+  viewer of its session, presenter or not, from a server or a Mac origin (`publishMessageQueued`), and the viewer
+  emits the event on the row (`emitRemoteMessage`). Counts on a row attached alone or from another Mac are
+  `docs/backlog/pending-counts-on-attached-rows.md`, an exception Eugene approved.
 
 ## Keymap, config, theme, and sidebar
 
@@ -2250,6 +2262,10 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   standalone `RemoteSession.forwardCommand` runs it too, or its forward outlives the link with the page's port dead.
   Structural actions go to the server through `RemoteCatalogActions` and are disabled while disconnected,
   never queued; `RemoteWindowViewState` keeps what this Mac detached and its kept views.
+- A catalog session's `name` is its resolved label and `customName` its manual name, `""` when it has none.
+  A remote window's terminal row takes `customName` as its own, so an unnamed row follows its terminal title as a
+  local one does (#991); a page row takes `name`. An omitted `customName` marks an older server, whose `name` is
+  taken instead, so the server sends `""` for an unnamed session, never nil.
 - A loopback URL page on the server opens through `PooledForward` on the row's ssh master, or a standalone
   `RemotePortForward`, only for a presenter listing `PresentationHub.pageForwardKind`.
 - The server keeps page rows: `session.page`, `session.companion.page` and `session.companion.page.attach` are

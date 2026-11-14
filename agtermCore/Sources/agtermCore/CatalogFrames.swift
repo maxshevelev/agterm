@@ -29,11 +29,14 @@ public struct CatalogPane: Codable, Equatable, Sendable {
     public var identity: UUID
     public var daemon: String
     public var endpoint: ControlZmxEndpoint
+    /// pendingMessages is the pane's unacked mail on the server, omitted at none and by a server predating it.
+    public var pendingMessages: Int?
 
-    public init(identity: UUID, daemon: String, endpoint: ControlZmxEndpoint) {
+    public init(identity: UUID, daemon: String, endpoint: ControlZmxEndpoint, pendingMessages: Int? = nil) {
         self.identity = identity
         self.daemon = daemon
         self.endpoint = endpoint
+        self.pendingMessages = pendingMessages
     }
 }
 
@@ -54,9 +57,13 @@ public struct CatalogSessionFields: Codable, Equatable, Sendable {
     public var scratch: CatalogScratch?
     /// page marks a page row, which has no pane; its `primary` is its own id.
     public var page: CatalogPage?
+    /// customName is the session's manual name, empty when it has none, while `name` is its resolved label. A
+    /// server predating it omits it, and its `name` then stands in as the manual name.
+    public var customName: String?
 
     public init(id: UUID, name: String, parent: UUID?, cwd: String, primary: UUID, axis: String?, shown: Bool,
-                lifecycle: CatalogLifecycle, scratch: CatalogScratch? = nil, page: CatalogPage? = nil) {
+                lifecycle: CatalogLifecycle, scratch: CatalogScratch? = nil, page: CatalogPage? = nil,
+                customName: String? = nil) {
         self.id = id
         self.name = name
         self.parent = parent
@@ -67,6 +74,7 @@ public struct CatalogSessionFields: Codable, Equatable, Sendable {
         self.lifecycle = lifecycle
         self.scratch = scratch
         self.page = page
+        self.customName = customName
     }
 }
 
