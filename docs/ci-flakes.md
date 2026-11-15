@@ -111,6 +111,27 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   contended main actor did not fit in 8 s. The log cannot tell them apart.
 - **Fix.** The wait is 60 s, and `#expect(!session.ended)` makes a repeat of (a) name itself.
 
+### `ServerActionsInfoTests.anInfoLineWithHideAfterExpiresOnTheServer`
+
+- **Symptom.** `(session.info → SessionInfo(source: "soon", ...)) == nil` at line 39, after 49 s on Linux and
+  58 s on macOS, in the same run on both.
+- **Runs.** Jobs 132567710924 (Unit tests) and 132567710941 (Linux core tests), PR #999's first run of the test.
+- **Cause, inferred from CI timing, not reproduced locally.** The main actor was saturated by parallel suites for
+  about 50 s: the synchronous `anInfoLineIsSetAndCleared` took 56 s and 66 s, and the failure fired 2 ms before
+  `aRefreshedLineReplacesTheEarlierExpiry` passed. The test polled `session.info` against a 30 s wall-clock
+  deadline, so it could resume after the stall, find the deadline gone and fail before the 0.05 s expiry task,
+  also waiting for the main actor, cleared the line.
+- **Fix.** The test awaits the armed expiry task itself (`infoAutoHide[id]?.task.value`) instead of the clock.
+
+### `RemoteCatalogActionsTests.anUndoIDLeavesByItselfWhenItsGraceEnds`
+
+- **Symptom.** `(actions.undoIDs → ["u1"]).isEmpty → false` at line 180 after 60 s, macOS only.
+- **Runs.** Job 132573096708, PR #999.
+- **Cause, inferred from CI timing, not reproduced locally.** The same main-actor saturation as the entry above
+  outran a 30 s wall-clock poll before the 0.05 s grace task in `noteUndo` removed the id.
+- **Fix.** The poll is bounded by 3000 attempts of 10 ms instead of a deadline, so a long stall spends wall time
+  but not attempts; `noteUndo` keeps no task handle to await.
+
 ### `SshConnectionPoolTests` cases waiting in `held()` on Linux
 
 - **Symptom.** `Expectation failed: await held()` in `callersArrivingDuringAStartShareIt`,
@@ -132,6 +153,11 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   count nor the number of queued tasks was measured.
 - **Fix.** `held()` gives up after 1000 `Task.yield` retries instead of a deadline, so a stall slows it but cannot
   expire it. The startup stall itself remains.
+- **Pool waits removed.** `HudHelperTests` and `OverlayRunJobTests` now wait with `Task.sleep` instead of parking
+  worker threads. Three full runs each, same container, 4 pinned CPUs: trivial `ControlEventRingTests` cases
+  reported 17.0, 14.5 and 15.6 s before and 13.1, 14.7 and 13.7 s after; the suite took 44.2, 43.8 and 44.3 s
+  before and 41.7, 41.1 and 44.0 s after. About 2 s of the stall, within the noise of three runs; the rest has
+  another cause.
 
 ### `ServerStreamsTests.twoViewsAreServedAtOnceAndBridgeRequestsRunOnTheServer`
 
@@ -234,12 +260,14 @@ Each entry separates a demonstrated cause from one that is only consistent with 
 - **Fix.** The page holds the counts it reports during setup and sends them after `ready`.
   `TextPageRenderingTests` pins the message order for a diff with changes, one without, and a seeded search.
 
-### Three earlier hosted failures, already fixed on master
+### Earlier hosted failures, already fixed on master
 
 - `HtmlOverlayViewTests` line 48 read the page title before it arrived; fixed in #949.
 - `testTheBarFitsANarrowPageFollowingAndPaused` overflowed when the runner showed a scroll bar; fixed in b7884db7.
 - `testAWrappedFollowingLogStaysAtItsEndWhenItNarrows` waited for a width a 17 px runner scroll bar never allows;
   fixed in the #934 squash.
+- `testTheFileButtonLeavesTheSearchControlsOnANarrowPage` waited for `clientWidth` 1200 and read 1183 under the same
+  scroll bar; it waits for `window.innerWidth` since #997.
 
 A WebContent crash appears in passing hosted runs as well as failing ones and was not linked to any failure
 above. That it follows the drag and paste tests releasing their named pasteboards is an inference.

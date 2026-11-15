@@ -35,6 +35,8 @@ public final class PresentationHub {
         var pingedAt: Date?
         /// Deltas published while the snapshot is being taken, held so they land after it.
         var held: [PresentationFrame.Body]? = []
+        /// mail is the counts this viewer last accepted, from its snapshot or a mail frame.
+        var mail: PresentationMail?
 
         init(session: UUID, generation: Int, sink: PresentationSink) {
             self.session = session
@@ -65,16 +67,21 @@ public final class PresentationHub {
     }
 
     /// The frame kinds this origin can produce.
-    public static let supportedKinds = ["status", "hud", "notify", "message", "context", "info", "layout", "sound", askFormKind, askOtherKind,
+    public static let supportedKinds = ["status", "hud", "notify", "message", "mail", "context", "info", "layout", "sound", askFormKind, askOtherKind,
                                         overlayPointsKind, pageContentKind, pageDocumentKind, pageLinksKind, statusShapesKind,
                                         statusCheckmarkKind, linkClickKind, pendingSnapshotKind, jobTokenKind, pageForwardKind,
-                                        pageTextKind]
+                                        pageTextKind, pageFilesKind, statusClearKind, restartRespawnKind]
                                         + pageKinds + pickKinds
     /// pageKinds are the presentation kinds a presenter must speak to be handed a page.
     public static let pageKinds = ["page.request", "page.rejected", "page.close", "page.closed", "page.command",
                                    "page.state"]
     /// pickKinds are the presentation kinds a presenter must speak to be handed a session-bound pick.
     public static let pickKinds = ["pick.request", "pick.resolve", "pick.rejected", "pick.dismiss"]
+    /// restartRespawnKind is an origin's capability of publishing a restarted pane's respawn, which carries every viewer's
+    /// attach across the restart.
+    public static let restartRespawnKind = "restart.respawn"
+    /// statusClearKind is an origin's capability of taking `status.clear` and `status.seen` from its presenter.
+    public static let statusClearKind = "status.clear"
     /// pendingSnapshotKind is a presenter's capability of taking a headless origin's pending interactions.
     public static let pendingSnapshotKind = "pending.snapshot"
     /// jobTokenKind is a presenter's capability of passing an overlay job's offer token to its helper.
@@ -94,12 +101,14 @@ public final class PresentationHub {
     /// pageLinksKind advertises a markdown page that follows its links under `PresentationPage.markdownLinks`; an older
     /// presenter would fetch the original spelling and `.md` pictures, so it is handed the page without links.
     public static let pageLinksKind = "page.links"
-    /// pageForwardKind is a presenter's capability of reaching a headless origin's loopback URL page through an ssh
-    /// forward it opens.
+    /// pageForwardKind is a presenter's capability of reaching an origin's loopback URL page through an ssh forward it
+    /// opens.
     public static let pageForwardKind = "page.forward"
     /// pageTextKind advertises live text pages: log pages, the text page actions, their `pageResult` answers and the
     /// text state in `pageState`.
     public static let pageTextKind = "page.text"
+    /// pageFilesKind advertises the diff page file jump, a page action an older `page.text` presenter cannot decode.
+    public static let pageFilesKind = "page.files"
     /// statusShapesKind advertises the expanded status-shape set.
     public static let statusShapesKind = "status.shapes"
     /// statusCheckmarkKind advertises `StatusShape.checkmark`, added after `status.shapes` shipped.
@@ -196,6 +205,21 @@ public final class PresentationHub {
         sendToPresenter(.pendingCommit, session: session)
     }
 
+    /// publishMail sends `session`'s mail counts to each viewer whose last accepted counts differ, so every viewer
+    /// converges on the current map whatever it saw in between.
+    public func publishMail(_ mail: PresentationMail, session: UUID) {
+        for (id, subscriber) in subscribers where subscriber.session == session {
+            if subscriber.held != nil {
+                subscriber.held?.append(.mail(mail))
+                continue
+            }
+            if subscriber.mail != mail { send(.mail(mail), to: id) }
+        }
+    }
+
+    /// subscribedSessions are the sessions at least one viewer follows.
+    public var subscribedSessions: Set<UUID> { Set(subscribers.values.map(\.session)) }
+
     func publishLayout(_ layout: PresentationLayout, session: UUID) {
         guard subscriberCount(session: session) > 0, layouts[session] != layout else { return }
         layouts[session] = layout
@@ -223,7 +247,7 @@ public final class PresentationHub {
             send(granted ? .presenterGranted : .presenterRefused, to: id)
             if granted { onPresenterGranted?(subscriber.session) }
         case .askResolve, .askRejected, .pickResolve, .pickRejected, .overlayRejected, .overlayClosed, .pageRejected, .pageClosed,
-             .pageState, .pageResult, .linkClick:
+             .pageState, .pageResult, .linkClick, .statusClear, .statusSeen:
             guard grant.holder(of: subscriber.session) == id else { return }
             onPresenterFrame?(subscriber.session, frame.body)
         default: break
@@ -269,6 +293,11 @@ public final class PresentationHub {
             return false
         }
         subscriber.revision += 1
+        switch body {
+        case .snapshot(let snapshot): subscriber.mail = snapshot.mail
+        case .mail(let mail): subscriber.mail = mail
+        default: break
+        }
         return true
     }
 

@@ -143,6 +143,10 @@ struct PresentationFramesTests {
         PresentationFrame(gen: 1, rev: 60, body: .pageResult(PresentationPageResult(
             page: "p10", seq: 2, ok: true, text: "2 of 7", state: PresentationTextState(query: "timeout", revision: 4, matches: 7, current: 2)))),
         PresentationFrame(gen: 1, rev: 61, body: .pageResult(PresentationPageResult(page: "p10", seq: 3, ok: false, error: "no query"))),
+        PresentationFrame(gen: 1, rev: 62, body: .pageCommand(PresentationPageCommand(page: "p10", seq: 4, action: .files, file: "src/b.go"))),
+        PresentationFrame(gen: 1, rev: 63, body: .pageResult(PresentationPageResult(
+            page: "p10", seq: 4, ok: true, text: "2 of 4: src/b.go",
+            state: PresentationTextState(revision: 4, files: TextFiles(count: 4, current: 2, path: "src/b.go"))))),
     ]
 
     @Test(arguments: [
@@ -352,6 +356,28 @@ struct PresentationFramesTests {
         #expect(PresentationHub.supportedKinds.contains("message"))
     }
 
+    @Test @MainActor func aMailFrameAndSnapshotCarryCountsAsAnObjectKeyedByPane() throws {
+        let pane = UUID()
+        let mail = PresentationMail(panes: [pane.uuidString: 3])
+        let line = try PresentationCodec.encode(PresentationFrame(gen: 1, rev: 2, body: .mail(mail)))
+        let snapshot = PresentationSnapshot(status: nil, hud: nil, mail: PresentationMail(panes: [:]))
+        let snapshotLine = try PresentationCodec.encode(PresentationFrame(gen: 1, rev: 1, body: .snapshot(snapshot)))
+
+        #expect(String(decoding: line, as: UTF8.self).contains(#""mail":{"panes":{"\#(pane.uuidString)":3}}"#))
+        #expect(try PresentationCodec.decode(line.dropLast()).body == .mail(mail))
+        #expect(try PresentationCodec.decode(snapshotLine.dropLast()).body == .snapshot(snapshot))
+        #expect(PresentationHub.supportedKinds.contains("mail"))
+    }
+
+    @Test func aSnapshotFromAnOriginWithoutMailDecodesWithNone() throws {
+        let line = Data(#"{"kind":"snapshot","gen":1,"rev":1,"snapshot":{"context":"PR #517"}}"#.utf8)
+
+        let frame = try PresentationCodec.decode(line)
+
+        guard case .snapshot(let snapshot) = frame.body else { Issue.record("not a snapshot"); return }
+        #expect(snapshot.mail == nil)
+    }
+
     @Test func anUnknownKindDecodesToUnknownAndKeepsItsOrdering() throws {
         let line = Data(#"{"kind":"future.kind","gen":3,"rev":12,"job":"abc"}"#.utf8)
 
@@ -453,5 +479,39 @@ struct PresentationFramesTests {
     @Test(arguments: [0, -1])
     func aPeerBelowVersionOneCannotBeNegotiated(_ theirs: Int) {
         #expect(PresentationCodec.negotiatedVersion(ours: 1, theirs: theirs) == nil)
+    }
+
+    @Test func statusClearAndSeenRoundTrip() throws {
+        let bodies: [PresentationFrame.Body] = [.statusClear(PresentationStatusClear(reason: .submit, pane: .identity(UUID()))),
+                                                .statusClear(PresentationStatusClear(reason: .select)),
+                                                .statusSeen(PresentationSeen(reason: .viewed))]
+        for body in bodies {
+            let frame = PresentationFrame(gen: 1, rev: 2, body: body)
+
+            let line = try PresentationCodec.encode(frame)
+
+            #expect(try PresentationCodec.decode(line.dropLast()) == frame)
+        }
+    }
+
+    @Test func aClearWithAnUnknownReasonOrPaneStillDecodes() throws {
+        let line = #"{"kind":"status.clear","gen":1,"rev":1,"status":{"reason":"wave","pane":"nowhere"}}"#
+
+        guard case .statusClear(let clear) = try PresentationCodec.decode(Data(line.utf8)).body else {
+            Issue.record("not a status clear")
+            return
+        }
+        #expect(clear.reason == nil)
+        #expect(clear.pane == nil)
+    }
+
+    @Test func autoResetTravelsAndAnOlderOriginsStatusLacksIt() throws {
+        let status = PresentationStatus(status: .completed, blink: false, color: nil, shape: nil, pane: nil, changedAt: nil,
+                                        autoReset: true)
+        let decoded = try JSONDecoder().decode(PresentationStatus.self, from: JSONEncoder().encode(status))
+        let older = try JSONDecoder().decode(PresentationStatus.self, from: Data(#"{"status":"completed","blink":false}"#.utf8))
+
+        #expect(decoded.autoReset == true)
+        #expect(older.autoReset == nil)
     }
 }

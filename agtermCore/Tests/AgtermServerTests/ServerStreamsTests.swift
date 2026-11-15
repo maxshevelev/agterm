@@ -174,6 +174,7 @@ struct ServerStreamsTests {
         let answer = await offPool { viewer.first { if case .hello = $0 { true } else { false } } }
         guard case .hello(let hello)? = answer else { Issue.record("no hello"); return }
         #expect(hello.kinds.contains(PresentationHub.linkClickKind))
+        #expect(hello.kinds.contains(PresentationHub.statusClearKind))
     }
 
     @Test func aViewerGetsTheSnapshotThenTheSessionsChanges() async throws {
@@ -1250,6 +1251,13 @@ struct ServerStreamsTests {
         #expect(TextPageAction(command) == .changes(forward: true))
         try viewer.send(.pageResult(PresentationPageResult(page: page, seq: command.seq, ok: false, error: "no diff page")))
         #expect(await changes.value == ControlResponse(ok: false, error: "no diff page"))
+
+        let files = Task { await harness.actions.goSessionOverlayFiles(target, window: nil, pane: nil, to: "b.go") }
+        try await answer(viewer, page: page, .files("b.go"), text: "2 of 3: b.go",
+                         PresentationTextState(following: false, query: "x", revision: 1, matches: 2, current: 1, wrap: true,
+                                               files: TextFiles(count: 3, current: 2, path: "b.go")))
+        #expect(await files.value.result?.text == "2 of 3: b.go")
+        #expect(textNode(session)?.files == ControlTextFilesNode(count: 3, current: 2, path: "b.go"))
     }
 
     private static let olderKinds = PresentationHub.supportedKinds.filter { $0 != PresentationHub.pageTextKind }
@@ -1806,5 +1814,18 @@ struct ServerStreamsTests {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return condition()
+    }
+
+    @Test func aPresentersClearAndSeenFollowAMacsDefaultResets() throws {
+        let session = try newSession()
+        harness.store.setAgentIndicator(AgentIndicator(status: .blocked, statusPane: .left), forSession: session.id)
+        session.unseenCount = 2
+
+        streams.receivePresenterFrame(.statusClear(PresentationStatusClear(reason: .key, pane: .identity(session.paneIdentity))),
+                                      forSession: session.id)
+        streams.receivePresenterFrame(.statusSeen(PresentationSeen(reason: .key)), forSession: session.id)
+
+        #expect(session.agentIndicator.status == .idle)
+        #expect(session.unseenCount == 0)
     }
 }

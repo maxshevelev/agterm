@@ -43,6 +43,9 @@ C-boundary concurrency before changing the bridge.
 - A decline of a feature request that a custom command covers explains the extension model with the request
   as the worked example: README's "bind X yourself", `site/docs.html#extend`, the agent skill, the cookbook.
   It also points "can you add X" requests to Discussions ▸ Ideas instead of issues.
+- Custom forks are not supported. An answer, recipe or decision is made for agterm itself and is never limited or
+  adjusted for what a reporter's fork has or lacks. agterm-linux stays in view only as `agtermCore`'s downstream
+  consumer (module boundaries below).
 - When adding a process that runs user commands or reparents a session, weigh its effect on macOS TCC
   attribution per service, up front. The responsible process is not always TCC's authorization subject:
   the #574 microphone test recorded `agterm-session-host` as responsible, `com.umputun.agterm` as the
@@ -328,6 +331,11 @@ C-boundary concurrency before changing the bridge.
   keeps a new command off every page that merely mentions the catalog. `control-api.md` owns that rule.
   The positioning claim must stay consistent in substance, not byte-identical: `site/index.html`'s title and
   social tags insert `macOS` for search intent, and `site/llms.txt` carries a libghostty-based variant.
+- `site/docs.html` is the complete user reference, written for people: every behavior, setting, flag, file format,
+  env var and JSON field a user sees or scripts against, organized by task in short paragraphs, lists and tables,
+  with screenshots for anything visual.
+  The mechanism behind a behavior (which process answers what, transport, internal limits) goes in
+  `.claude/rules` or `ARCHITECTURE.md`, never the guide. One body text color.
 - `site/index.html` reflects major features and current `softwareVersion`; `site/commands.html` mirrors
   every command, arguments, and read-back field.
 - `cookbook/` is not a synchronized surface. Recipes pin a minimum version;
@@ -364,6 +372,10 @@ C-boundary concurrency before changing the bridge.
   media fallbacks as in `.surfaces-grid`.
 - Demo and screenshot staging shows two or three agent statuses at most, and never notification badges
   next to statuses; they are alternative mechanisms.
+- A screenshot may show the username, the hostname, the agent's plan and usage, and Claude Code or codex working
+  on agterm itself with nothing private in it. A feature that serves agents is shown with real agents on agterm,
+  other sessions with made-up output; never another project's content, private folder or host names.
+  Start codex with `--no-daemon`: a bare `codex` runs its hooks in the background service, which reports no status.
 
 ## Path-scoped rules
 

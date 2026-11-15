@@ -36,10 +36,24 @@ struct ControlProtocolTests {
         let changes = ControlRequest(cmd: .sessionOverlayChanges, args: ControlArgs(pane: "right", to: "prev"))
         #expect(try roundTrip(changes) == changes)
         #expect(Command.sessionOverlayChanges.rawValue == "session.overlay.changes")
+        let files = ControlRequest(cmd: .sessionOverlayFiles, args: ControlArgs(pane: "right", to: "src/b.go"))
+        #expect(try roundTrip(files) == files)
+        #expect(Command.sessionOverlayFiles.rawValue == "session.overlay.files")
 
         let plain = String(data: try JSONEncoder().encode(ControlArgs(textFile: "/tmp/a.txt")), encoding: .utf8) ?? ""
         #expect(!plain.contains("tail"))
         #expect(!plain.contains("followFile"))
+    }
+
+    @Test func terminateAndThePinnedKillKeepTheirWireNames() {
+        #expect(Command.sessionTerminate.rawValue == "session.terminate")
+        #expect(Command.zmxKillPane.rawValue == "zmx.kill.pane")
+    }
+
+    @Test func closeRecentIDRoundTripsAndIsOmittedWhenNil() throws {
+        let response = ControlResponse(ok: true, result: ControlResult(id: "s1", closed: ["s1"], recentID: "r1"))
+        #expect(try roundTrip(response) == response)
+        #expect(!String(decoding: try JSONEncoder().encode(ControlResult(id: "s1", closed: ["s1"])), as: UTF8.self).contains("recentID"))
     }
 
     @Test func treeRequestRoundTrips() throws {

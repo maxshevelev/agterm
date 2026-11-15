@@ -99,7 +99,7 @@ paths:
   untouched rather than clearing it. No control form — see `control-api.md`.
 - Rename, Copy Name, Duplicate Session, New Companion, Duplicate as Companion, Convert to Companion, and Reveal in
   Finder appear only for one target. Duplicate as Companion is omitted on a page row; Convert to Companion is omitted
-  on a companion row and disabled on a remote one. Duplicate inserts a fresh
+  on a companion row; a row attached from another host is converted by its origin. Duplicate inserts a fresh
   login-shell session immediately after the source in the same workspace, using only
   `Session.focusedCwd`. It does not copy name, command, panes, status, flag, font size, or watermark.
   `session.duplicate` provides the control form; its `tree.cwd` can differ from focused cwd when a split's
@@ -245,7 +245,7 @@ paths:
 - Known gaps are intentional: background `addSession(select: false)` and non-active `moveSession` can
   populate an empty visible set without selecting it. Explicit selection of an unflagged session while
   flagged also remains invisible rather than forcing a mode change.
-- Terminal focus needs no app bridge: `TerminalView.updateNSView` resigns inactive surfaces and
+- Terminal focus needs no app bridge: `TerminalSurfaceHost.updateNSView` resigns inactive surfaces and
   `focusIfNeeded` claims the active one. Auto-follow alone posts a pane-specific notification.
 
 ## Reconciliation and expansion

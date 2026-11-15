@@ -81,6 +81,16 @@ extension AppStore {
         return showReplicaPage(overlay, backgroundColor: page.backgroundColor, in: row)
     }
 
+    /// fillReplicaPage shows another Mac's page in page row `rowID`, restored here and waiting for it, keeping the row's
+    /// id and place.
+    public func fillReplicaPage(_ rowID: UUID, page: PresentationPage) -> Result<Session, ReplicaPageRefusal> {
+        guard let row = session(withID: rowID), row.content == .page, row.remoteHost != nil, !row.overlayActive else {
+            return .failure(.init("the row here was closed"))
+        }
+        guard let overlay = Self.replicaOverlay(page) else { return .failure(.init("the page cannot be shown here")) }
+        return showReplicaPage(overlay, backgroundColor: page.backgroundColor, in: row)
+    }
+
     /// showCatalogPage shows server page row `rowID`'s page in that row, nil once it shows. The row stays whatever
     /// happens: the catalog owns it.
     public func showCatalogPage(_ page: PresentationPage, inRow rowID: UUID) -> String? {
@@ -189,7 +199,7 @@ extension AppStore {
         return PresentationTextState(following: page.logState?.following, log: page.logState?.report,
                                      query: page.textSearch?.query, revision: page.searchRevision,
                                      matches: page.textSearch?.matches, current: page.textSearch?.current,
-                                     wrap: page.textWrap, changes: page.textChanges)
+                                     wrap: page.textWrap, changes: page.textChanges, files: page.textFiles)
     }
 
     /// closeReplicaPages takes down every page `session` shows for its origin: with the stream gone the origin

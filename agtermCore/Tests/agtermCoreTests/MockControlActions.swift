@@ -17,6 +17,7 @@ final class MockControlActions: ControlActions {
         case sessionGo(window: String?, SessionNavigation)
         case sessionClose(target: String?, window: String?)
         case sessionCloseBatch(targets: [String], window: String?)
+        case sessionTerminate(targets: [String], window: String?, undoable: Bool)
         case sessionRename(target: String?, window: String?, String)
         case sessionReveal(target: String?, window: String?)
         case workspaceNew(window: String?, String?, collapsed: Bool)
@@ -80,6 +81,7 @@ final class MockControlActions: ControlActions {
         case zmxScreen(name: String, fullBuffer: Bool, lines: Int?)
         case zmxPrune
         case zmxKill(target: String, window: String?, pane: ZmxPaneRole)
+        case zmxKillPane(target: String, window: String?, pane: ZmxPaneRole, paneID: String)
         case zmxReset
         case zmxTree(host: String?)
         case zmxAttach(host: String, session: String)
@@ -107,6 +109,7 @@ final class MockControlActions: ControlActions {
         case overlayWrap(target: String?, window: String?, pane: OverlayPane?, mode: ControlToggleMode)
         case overlaySearch(target: String?, window: String?, pane: OverlayPane?, request: TextSearchRequest)
         case overlayChanges(target: String?, window: String?, pane: OverlayPane?, forward: Bool)
+        case overlayFiles(target: String?, window: String?, pane: OverlayPane?, to: String)
         case overlayReload(target: String?, window: String?, pane: OverlayPane?, current: Bool)
         case overlayNavigate(target: String?, window: String?, pane: OverlayPane?, HtmlNavigation)
         case overlayResize(target: String?, window: String?, sizePercent: Int?)
@@ -271,6 +274,11 @@ final class MockControlActions: ControlActions {
 
     func closeSessions(_ targets: [String], window: String?) -> ControlResponse {
         calls.append(.sessionCloseBatch(targets: targets, window: window))
+        return ControlResponse(ok: true)
+    }
+
+    func terminateSessions(_ targets: [String], window: String?, undoable: Bool) -> ControlResponse {
+        calls.append(.sessionTerminate(targets: targets, window: window, undoable: undoable))
         return ControlResponse(ok: true)
     }
 
@@ -618,6 +626,11 @@ final class MockControlActions: ControlActions {
         return nextZmxKillResponse
     }
 
+    func killZmxPane(target: String, window: String?, pane: ZmxPaneRole, paneID: String) -> ControlResponse {
+        calls.append(.zmxKillPane(target: target, window: window, pane: pane, paneID: paneID))
+        return nextZmxKillResponse
+    }
+
     func resetLiveSessions() -> ControlResponse {
         calls.append(.zmxReset)
         return nextZmxResetResponse
@@ -770,6 +783,11 @@ final class MockControlActions: ControlActions {
                                    forward: Bool) async -> ControlResponse {
         calls.append(.overlayChanges(target: target, window: window, pane: pane, forward: forward))
         return ControlResponse(ok: true, result: ControlResult(id: target, text: "3 of 7"))
+    }
+
+    func goSessionOverlayFiles(_ target: String?, window: String?, pane: OverlayPane?, to: String) async -> ControlResponse {
+        calls.append(.overlayFiles(target: target, window: window, pane: pane, to: to))
+        return ControlResponse(ok: true, result: ControlResult(id: target, text: "2 of 4: b.go"))
     }
 
     func resizeSessionOverlay(_ target: String?, window: String?, sizePercent: Int?) -> ControlResponse {

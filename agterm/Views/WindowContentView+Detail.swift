@@ -141,6 +141,7 @@ extension WindowContentView {
                              isActive: focusable && !session.coverOverlayVisible,
                              deckVisible: deckInteractive && isActive && !fullOverlay && !quickTerminal.holdsKey,
                              onScreen: deckInteractive && isActive && !fullOverlay)
+                    .overlay { PaneLeadCover(session: session, pane: .scratch, background: terminalColor, foreground: chromeText) }
                     .opacity(fullOverlay ? 0 : 1)
                     .allowsHitTesting(!fullOverlay)
                     .id("\(session.id.uuidString)-scratch-\(session.scratchGeneration)")
@@ -267,8 +268,8 @@ extension WindowContentView {
                     Color.clear
                         .id("\(session.id.uuidString)-\(pane == .left ? "primary" : "split")-placeholder")
                 }
-                PaneLeadCover(session: session, pane: pane, background: terminalColor, foreground: chromeText,
-                              hidden: covered)
+                PaneLeadCover(session: session, pane: pane == .left ? .left : .right, background: terminalColor,
+                              foreground: chromeText, hidden: covered)
                 paneOverlayPanel(session: session, pane: pane, focused: focused, gates: gates)
             }
             .hudPaneAnchor(pane)
@@ -333,7 +334,7 @@ extension WindowContentView {
                             TerminalView(session: session, surfaceKeyPath: \.overlaySurface,
                                          makeSurface: { makeOverlaySurface($0, nil) },
                                          isActive: live, deckVisible: live, viewOnly: !style.interactive,
-                                         onScreen: onScreen && shown)
+                                         onScreen: onScreen && shown, labelAbove: session.hudActive)
                         }
                     }
                         .frame(width: panelFrame.width, height: panelFrame.height)
@@ -354,6 +355,13 @@ extension WindowContentView {
                         // without the generation SwiftUI reuses the host: `makeNSView` never re-runs and
                         // `updateNSView` hits a torn-down view with `overlaySurface` nil.
                         .id("\(session.id.uuidString)-overlay-\(session.overlaySlotGeneration)")
+                }
+            }
+            .overlayPreferenceValue(LinkHoverModelKey.self) { model in
+                if let model {
+                    LinkHoverLabel(model: model)
+                        .frame(width: layoutFrame.width, height: layoutFrame.height, alignment: .bottomLeading)
+                        .position(x: layoutFrame.midX, y: layoutFrame.midY)
                 }
             }
             .opacity(shown ? 1 : 0)

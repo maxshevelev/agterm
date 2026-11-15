@@ -423,4 +423,106 @@ struct PresentationHubTests {
 
         #expect(sink.frames.count == 2)
     }
+
+    @Test func onlyThePresentersStatusClearAndSeenReachTheHost() throws {
+        let hub = makeHub()
+        var received: [PresentationFrame.Body] = []
+        hub.onPresenterFrame = { _, body in received.append(body) }
+        let hello = PresentationHello(version: 1, kinds: [PresentationHub.statusClearKind], mode: .presenter)
+        let presenterSink = Sink()
+        let presenter = try hub.subscribe(session: Self.session, hello: hello, sink: presenterSink) { Self.empty }
+        hub.receive(PresentationFrame(gen: presenterSink.frames[0].gen, rev: 0, body: .presenterAcquire), from: presenter)
+        let mirrorSink = Sink()
+        let mirror = try hub.subscribe(session: Self.session, hello: hello, sink: mirrorSink) { Self.empty }
+        let clear = PresentationFrame.Body.statusClear(PresentationStatusClear(reason: .manual))
+        let seen = PresentationFrame.Body.statusSeen(PresentationSeen(reason: .viewed))
+
+        hub.receive(PresentationFrame(gen: mirrorSink.frames[0].gen, rev: 1, body: clear), from: mirror)
+        hub.receive(PresentationFrame(gen: presenterSink.frames[0].gen, rev: 1, body: clear), from: presenter)
+        hub.receive(PresentationFrame(gen: presenterSink.frames[0].gen, rev: 2, body: seen), from: presenter)
+
+        #expect(received == [clear, seen])
+        #expect(presenterSink.bodies.first == .hello(hello))
+    }
+
+    static let pane = UUID().uuidString
+
+    static func mail(_ count: Int?) -> PresentationMail { PresentationMail(panes: count.map { [pane: $0] } ?? [:]) }
+
+    static func mailSnapshot(_ count: Int?) -> PresentationSnapshot {
+        PresentationSnapshot(status: nil, hud: nil, mail: mail(count))
+    }
+
+    func lastMail(_ sink: Sink) -> PresentationMail? {
+        sink.bodies.reduce(nil) { last, body in
+            switch body {
+            case .snapshot(let snapshot): return snapshot.mail
+            case .mail(let mail): return mail
+            default: return last
+            }
+        }
+    }
+
+    // regression: a count acked while nobody watched must not hide the next identical count from a new viewer
+    @Test func aViewerArrivingAfterMailWasAckedUnwatchedGetsTheNextCount() throws {
+        let hub = makeHub()
+        let first = Sink()
+        let id = try hub.subscribe(session: Self.session, hello: Self.hello, sink: first) { Self.mailSnapshot(nil) }
+        hub.publishMail(Self.mail(1), session: Self.session)
+        hub.unsubscribe(id)
+
+        let next = Sink()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: next) { Self.mailSnapshot(nil) }
+        hub.publishMail(Self.mail(1), session: Self.session)
+
+        #expect(lastMail(next) == Self.mail(1))
+    }
+
+    // regression: a viewer subscribing between an ack and a new send ends at the current count, as does the one before it
+    @Test func everyViewerConvergesWhenOneSubscribesBetweenAnAckAndANewSend() throws {
+        let hub = makeHub()
+        let first = Sink()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: first) { Self.mailSnapshot(nil) }
+        hub.publishMail(Self.mail(1), session: Self.session)
+
+        let second = Sink()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: second) { Self.mailSnapshot(nil) }
+        hub.publishMail(Self.mail(1), session: Self.session)
+
+        #expect(lastMail(first) == Self.mail(1))
+        #expect(lastMail(second) == Self.mail(1))
+    }
+
+    @Test func anUnchangedMailMapSendsNothing() throws {
+        let hub = makeHub()
+        let sink = Sink()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: sink) { Self.mailSnapshot(2) }
+        let sent = sink.frames.count
+
+        hub.publishMail(Self.mail(2), session: Self.session)
+
+        #expect(sink.frames.count == sent)
+    }
+
+    @Test func mailPublishedWhileTheSnapshotIsTakenLandsAfterIt() throws {
+        let hub = makeHub()
+        let sink = Sink()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: sink) {
+            hub.publishMail(Self.mail(1), session: Self.session)
+            return Self.mailSnapshot(1)
+        }
+        hub.publishMail(Self.mail(1), session: Self.session)
+
+        #expect(sink.bodies == [.hello(Self.hello), .snapshot(Self.mailSnapshot(1)), .mail(Self.mail(1))])
+    }
+
+    @Test func subscribedSessionsListsEverySessionWithAViewer() throws {
+        let hub = makeHub()
+        let other = UUID()
+        try hub.subscribe(session: Self.session, hello: Self.hello, sink: Sink()) { Self.empty }
+        let id = try hub.subscribe(session: other, hello: Self.hello, sink: Sink()) { Self.empty }
+        hub.unsubscribe(id)
+
+        #expect(hub.subscribedSessions == [Self.session])
+    }
 }
