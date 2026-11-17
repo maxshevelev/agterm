@@ -21,18 +21,22 @@ public struct ControlSurfaceNode: Codable, Sendable, Equatable {
     /// reconnect is present while this pane's ssh lost its connection and the app waits to attach it
     /// again, omitted otherwise.
     public let reconnect: ControlReconnect?
+    /// attachEnded is true while this remote pane's attach ended and it shows the ended notice, omitted otherwise.
+    public let attachEnded: Bool?
     /// paneID is the token `--pane-id` resolves, omitted for a slot whose surface carries none.
     public let paneID: String?
     /// pendingMessages counts the pane's unacked bus messages, omitted at zero.
     public let pendingMessages: Int?
+    /// remote is true when this pane's next ask, overlay or page goes to an attached Mac, omitted otherwise.
+    public let remote: Bool?
 
     public init(id: String, kind: String, active: Bool, visible: Bool) {
         self.init(id: id, kind: kind, active: active, visible: visible, backedByZmx: nil)
     }
 
     public init(id: String, kind: String, active: Bool, visible: Bool, backedByZmx: Bool?,
-                lead: ZmxLeadRole? = nil, reconnect: ControlReconnect? = nil, paneID: String? = nil,
-                pendingMessages: Int? = nil) {
+                lead: ZmxLeadRole? = nil, reconnect: ControlReconnect? = nil, attachEnded: Bool? = nil,
+                paneID: String? = nil, pendingMessages: Int? = nil, remote: Bool? = nil) {
         self.id = id
         self.kind = kind
         self.active = active
@@ -40,8 +44,10 @@ public struct ControlSurfaceNode: Codable, Sendable, Equatable {
         self.backedByZmx = backedByZmx
         self.lead = lead
         self.reconnect = reconnect
+        self.attachEnded = attachEnded
         self.paneID = paneID
         self.pendingMessages = pendingMessages
+        self.remote = remote
     }
 }
 
@@ -327,6 +333,10 @@ public struct ControlSessionNode: Codable, Sendable, Equatable {
     /// When the status was last set, idle and repeated values included, as epoch seconds on the
     /// `ControlEvent.ts` clock. Omitted before any set; never persisted.
     public let statusChangedAt: Double?
+    /// activePanes lists the panes still reporting `active` (`"left"|"right"|"scratch"`), empty when none, whatever the row shows:
+    /// a pane's turn end leaves the row on another pane's work, and this says which panes are working. Omitted
+    /// only for a row mirroring an origin that does not send the list.
+    public let activePanes: [String]?
     /// lastSelectedAt is `Session.lastSelectedAt` as epoch seconds; omitted when no selection timestamp has
     /// been recorded.
     public let lastSelectedAt: Double?
@@ -422,7 +432,7 @@ public struct ControlSessionNode: Codable, Sendable, Equatable {
                 foregroundShell: String? = nil, splitForegroundShell: String? = nil,
                 restoreCommand: String? = nil, splitRestoreCommand: String? = nil, status: String? = nil,
                 statusPane: String? = nil, statusBlink: Bool? = nil, statusColor: String? = nil,
-                statusShape: String? = nil, statusChangedAt: Double? = nil,
+                statusShape: String? = nil, statusChangedAt: Double? = nil, activePanes: [String]? = nil,
                 background: BackgroundWatermark? = nil, paneBackgrounds: PaneBackgrounds? = nil, unseen: Int? = nil,
                 fontSize: Double? = nil, splitFontSize: Double? = nil, scratchFontSize: Double? = nil,
                 surfaces: [ControlSurfaceNode]? = nil, realized: Bool? = nil,
@@ -483,6 +493,7 @@ public struct ControlSessionNode: Codable, Sendable, Equatable {
         self.statusColor = statusColor
         self.statusShape = statusShape
         self.statusChangedAt = statusChangedAt
+        self.activePanes = activePanes
         self.lastSelectedAt = lastSelectedAt
         self.tint = tint
         self.tintOn = tintOn
@@ -663,11 +674,17 @@ public struct ControlPresentationNode: Codable, Sendable, Equatable {
 public struct ControlPresentersNode: Codable, Sendable, Equatable {
     public let mirrors: Int
     public let presenter: Bool?
+    /// viewers counts every attached stream, the presenter included; absent from an app that predates it.
+    public let viewers: Int?
 
-    public init(mirrors: Int, presenter: Bool? = nil) {
+    public init(mirrors: Int, presenter: Bool? = nil, viewers: Int? = nil) {
         self.mirrors = mirrors
         self.presenter = presenter
+        self.viewers = viewers
     }
+
+    /// viewedBy is the number of attached streams, derived from `mirrors` and `presenter` for an older app.
+    public var viewedBy: Int { viewers ?? mirrors + (presenter == true ? 1 : 0) }
 }
 
 /// A workspace and its sessions as projected into the `tree` response.
@@ -808,6 +825,8 @@ public struct ControlTree: Codable, Sendable, Equatable {
     public let app: AppIdentity?
     /// remote is the server a remote window mirrors and its connection; nil/omitted for a local window.
     public var remote: ControlRemoteWindow?
+    /// catalogViewers is how many Macs mirror the projected window as a remote window, omitted at none.
+    public var catalogViewers: Int?
     /// The Live sessions reset state: app-global like `app`, omitted when nothing is pending and no launch
     /// has consumed a marker. The read side of `zmx.reset`.
     public let liveReset: ControlLiveResetReadback?
@@ -908,6 +927,8 @@ public struct ControlWindowNode: Codable, Sendable, Equatable {
     public let minimized: Bool?
     /// remote is the server a remote window mirrors; its `state` is omitted for a closed window, which has no stream.
     public var remote: ControlRemoteWindow?
+    /// catalogViewers is how many Macs mirror this window as a remote window, omitted at none.
+    public var catalogViewers: Int?
 
     public init(id: String, name: String, open: Bool, active: Bool, autoFollowMs: Int? = nil,
                 sidebarVisible: Bool? = nil, geometry: ControlWindowFrame? = nil,

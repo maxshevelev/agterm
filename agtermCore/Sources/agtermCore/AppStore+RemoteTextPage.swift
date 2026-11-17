@@ -26,6 +26,7 @@ public enum RemoteTextOutcome: Equatable, Sendable {
 public enum TextPageAction: Equatable, Sendable {
     case follow(ControlToggleMode)
     case wrap(ControlToggleMode)
+    case expand(ControlToggleMode)
     case search(TextSearchRequest)
     case changes(forward: Bool)
     case files(String)
@@ -40,6 +41,7 @@ public enum TextPageAction: Equatable, Sendable {
         switch (command.action, command.toggle, command.query, command.step) {
         case (.follow, let mode?, nil, nil): self = .follow(mode)
         case (.wrap, let mode?, nil, nil): self = .wrap(mode)
+        case (.expand, let mode?, nil, nil): self = .expand(mode)
         case (.search, nil, let query?, nil): self = .search(.query(query))
         case (.search, nil, nil, .next?): self = .search(.next)
         case (.search, nil, nil, .prev?): self = .search(.previous)
@@ -56,6 +58,7 @@ public enum TextPageAction: Equatable, Sendable {
         switch self {
         case .follow(let mode): PresentationPageCommand(page: page, seq: seq, action: .follow, toggle: mode)
         case .wrap(let mode): PresentationPageCommand(page: page, seq: seq, action: .wrap, toggle: mode)
+        case .expand(let mode): PresentationPageCommand(page: page, seq: seq, action: .expand, toggle: mode)
         case .search(.query(let query)):
             PresentationPageCommand(page: page, seq: seq, action: .search, query: String(query.prefix(TextSearch.maxQuery)))
         case .search(.next): PresentationPageCommand(page: page, seq: seq, action: .search, step: .next)
@@ -76,26 +79,27 @@ struct RemoteTextWait: Hashable {
 
 extension AppStore {
     /// remoteTextAction runs `action` on the page the presenting Mac shows in `pane`'s slot and waits for its result,
-    /// at most `remoteTextDeadline`. A presenter that does not list `page.text`, or `page.files` for a file jump, is
-    /// never sent one: it cannot decode the action and would end the whole presentation.
+    /// at most `remoteTextDeadline`. A presenter that does not list `page.text`, or `page.files` for a file jump or
+    /// `page.expand` for an expand, is never sent one: it cannot decode the action and would end the whole presentation.
     public func remoteTextAction(_ sessionID: UUID, pane: OverlayPane?, _ action: TextPageAction) async -> RemoteTextOutcome {
         guard let session = session(withID: sessionID), let slot = session.remoteOverlays.slot(pane), slot.page != nil
         else { return .local }
-        // a headless origin holds the page with no owner until a presenter connects
-        guard let hub = presentationHub, hub.presenterGeneration(session: sessionID) == slot.owner else {
+        // a headless origin holds the page with no owner until a viewer takes it
+        guard let hub = presentationHub, let owner = slot.owner, hub.isConnected(owner: owner) else {
             return .failed(OverlayResultError.viewerGone)
         }
-        guard hub.presenterSupports(PresentationHub.pageTextKind, session: sessionID) else { return .local }
-        if case .files = action, !hub.presenterSupports(PresentationHub.pageFilesKind, session: sessionID) { return .local }
+        guard hub.supports(PresentationHub.pageTextKind, owner: owner) else { return .local }
+        if case .files = action, !hub.supports(PresentationHub.pageFilesKind, owner: owner) { return .local }
+        if case .expand = action, !hub.supports(PresentationHub.pageExpandKind, owner: owner) { return .local }
         var seq = 0
         session.remoteOverlays.updatePage(slot.job) { seq = $0.nextSeq() }
         let wait = RemoteTextWait(job: slot.job, seq: seq)
         let command = action.command(page: slot.job, seq: seq)
         let deadline = remoteTextDeadline
         return await withCheckedContinuation { continuation in
-            // registered before the send, which can drop a stalled presenter and end the page synchronously
+            // registered before the send, which can drop a stalled viewer and end the page synchronously
             remoteTextWaits[wait] = continuation
-            guard hub.sendToPresenter(.pageCommand(command), session: sessionID) else {
+            guard hub.send(.pageCommand(command), toOwner: owner) else {
                 return settleRemoteText(wait, .failed(OverlayResultError.viewerGone))
             }
             Task { @MainActor [weak self] in
@@ -105,13 +109,15 @@ extension AppStore {
         }
     }
 
-    /// receiveRemoteTextResult applies the state a result carries, then answers the action waiting for it. A result
-    /// from a presenter that no longer holds the page is dropped.
-    func receiveRemoteTextResult(_ result: PresentationPageResult, in session: Session) {
-        guard let slot = session.remoteOverlays.slot(job: result.page),
-              slot.owner == presentationHub?.presenterGeneration(session: session.id) else { return }
+    /// receiveRemoteTextResult applies the state a result from viewer `sender` carries, then answers the action waiting
+    /// for it. A result from a viewer that does not hold the page is dropped.
+    func receiveRemoteTextResult(_ result: PresentationPageResult, in session: Session, from sender: Int) {
+        guard let slot = session.remoteOverlays.slot(job: result.page), slot.owner == sender else { return }
+        // the wait is matched by seq, never reused across offers; only the state belongs to the current one
         var changed = false
-        if let state = result.state { session.remoteOverlays.updatePage(result.page) { changed = $0.apply(state) } }
+        if let state = result.state, slot.page?.offer == result.offer {
+            session.remoteOverlays.updatePage(result.page) { changed = $0.apply(state) }
+        }
         if changed { scheduleTreeChanged() }
         settleRemoteText(RemoteTextWait(job: result.page, seq: result.seq), .answered(result))
     }

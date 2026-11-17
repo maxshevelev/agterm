@@ -35,6 +35,7 @@ C-boundary concurrency before changing the bridge.
 - For each hideable titlebar/sidebar element, ask whether it should join host-free `InterfaceElement` and
   Settings > Interface. Never add that preference without approval.
   A control enabled there stays visible and is disabled when it cannot act; never show or hide it by state.
+  The one exception is the update button: it shows only while an update is waiting, and disappears otherwise.
 - The HTML overlay displays a page over a session; it is not a browser.
   Moving within what the page was opened with is in scope: an HTML file's grant folder, a markdown file's link
   root, a URL page's origin, and any origin for a `--browse` page; a terminal click may replace a hidden clicked page.
@@ -243,7 +244,7 @@ C-boundary concurrency before changing the bridge.
 
 - `scripts/setup.sh` builds upstream `ghostty-org/ghostty` at `GHOSTTY_REV` using
   `zig build -Demit-xcframework=true -Dxcframework-target=native`, after applying
-  `scripts/ghostty-patches/*.patch`, then runs the teardown patch's Zig tests before staging anything.
+  `scripts/ghostty-patches/*.patch`, then runs the patches' Zig tests before staging anything.
   That directory documents each backport, its tests and its removal.
 - `GHOSTTY_REV` is `83fb956` (v1.4.0, 2026-10-27), a plain reproducibility pin carrying upstream's
   hidden-surface GPU release.

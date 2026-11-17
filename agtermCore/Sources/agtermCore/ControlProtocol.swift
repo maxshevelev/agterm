@@ -40,6 +40,7 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case sessionPage = "session.page"
     case sessionCompanionDuplicate = "session.companion.duplicate"
     case sessionCompanionConvert = "session.companion.convert"
+    case sessionCompanionMove = "session.companion.move"
     /// A viewer asking for one attachment of a page companion: a single-use token for `session.overlay.page.serve`
     /// plus what the page shows.
     case sessionCompanionPageAttach = "session.companion.page.attach"
@@ -78,6 +79,7 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case sessionOverlayChanges = "session.overlay.changes"
     case sessionOverlayFiles = "session.overlay.files"
     case sessionOverlayWrap = "session.overlay.wrap"
+    case sessionOverlayExpand = "session.overlay.expand"
     case sessionHudOpen = "session.hud.open"
     case sessionHudUpdate = "session.hud.update"
     case sessionHudClose = "session.hud.close"
@@ -139,6 +141,7 @@ public enum Command: String, Codable, Sendable, CaseIterable {
     case msgAck = "msg.ack"
     case restoreClear = "restore.clear"
     case version = "version"
+    case updateCheck = "update.check"
     case restoreCapture = "restore.capture"
     case restoreMode = "restore.mode"
     case zmxList = "zmx.list"
@@ -229,6 +232,9 @@ public struct ControlArgs: Codable, Sendable, Equatable {
     public var force: Bool?
     /// The machine `zmx tree` reaches, spelled as ssh would take it.
     public var host: String?
+    /// For `window.remote.open`: the Mac host's window to show, an id or unique prefix there. Distinct from `window`,
+    /// which names a window on this Mac and which a page's bridge fills in.
+    public var originWindow: String?
     /// For `session.new`: create in the background without selecting or focusing (the CLI's `--no-select`);
     /// omitted/`false` keeps select-and-focus. Read back via the `tree` `active` flag — the new node is not it.
     public var noSelect: Bool?
@@ -510,6 +516,10 @@ public struct ControlArgs: Codable, Sendable, Equatable {
     public var ack: Bool?
     /// ids are the message ids `msg.ack` removes.
     public var ids: [String]?
+    /// parent is the top-level session `session.companion.move` puts the target companion under.
+    public var parent: String?
+    /// index is the companion's slot among the new parent's companions for `session.companion.move`; nil appends.
+    public var index: Int?
 
     public init(name: String? = nil, cwd: String? = nil, targets: [String]? = nil,
                 workspace: String? = nil, workspaceName: String? = nil,
@@ -741,6 +751,9 @@ public struct ControlResult: Codable, Sendable, Equatable {
     public var headless: Bool?
     /// versions is what agterm-server advertises on `version`; a Mac app omits it.
     public var versions: CatalogVersions?
+    /// macCatalog is what a Mac app serving remote windows advertises on `version`, apart from `versions`, so a viewer
+    /// predating Mac origins still reads a Mac as one it cannot open.
+    public var macCatalog: CatalogVersions?
     /// receipt answers a command sent with an operation id, and `catalog.op`.
     public var receipt: CatalogReceipt?
     /// The restore-mode policy for `restore.mode`, and the header `zmx list` repeats so its rows can be
@@ -785,6 +798,8 @@ public struct ControlResult: Codable, Sendable, Equatable {
     /// acked names the messages removed, present on every `msg.ack` and `msg.read --ack` reply, empty included.
     public var acked: [String]?
     public var remoteGroup: ControlRemoteGroup?
+    /// updates is the Sparkle schedule on `version`, omitted by a build with no update feed.
+    public var updates: ControlUpdateStatus?
 
     public init(id: String? = nil, tree: ControlTree? = nil, text: String? = nil,
                 windows: [ControlWindowNode]? = nil, exitCode: Int? = nil, count: Int? = nil,
@@ -805,7 +820,10 @@ public struct ControlResult: Codable, Sendable, Equatable {
                 companionPage: PresentationPage? = nil,
                 messageID: String? = nil, delivered: [String]? = nil, rejected: [MessageRejection]? = nil,
                 messages: [BusMessage]? = nil, remaining: Int? = nil, acked: [String]? = nil,
-                remoteGroup: ControlRemoteGroup? = nil) {
+                remoteGroup: ControlRemoteGroup? = nil, macCatalog: CatalogVersions? = nil,
+                updates: ControlUpdateStatus? = nil) {
+        self.updates = updates
+        self.macCatalog = macCatalog
         self.messageID = messageID
         self.delivered = delivered
         self.rejected = rejected

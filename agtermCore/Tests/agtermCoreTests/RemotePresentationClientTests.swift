@@ -56,6 +56,9 @@ struct RemotePresentationClientTests {
         var respawns: [(PresentationRespawns, Bool)] = []
         var linkRefusals: [RemoteLinkRefusal] = []
         var warnings: [String] = []
+        var leads: Set<UUID> = []
+        var ends = 0
+        var acks = 0
     }
 
     final class Clock { var now = Date(timeIntervalSince1970: 1_789_000_000) }
@@ -102,6 +105,9 @@ struct RemotePresentationClientTests {
             linkRefused: { recorder.linkRefusals.append($0) },
             message: { recorder.messages.append($0) },
             mail: { recorder.mails.append($0) },
+            leads: { recorder.leads },
+            ended: { recorder.ends += 1 },
+            acked: { recorder.acks += 1 },
             warn: { recorder.warnings.append($0) })
         return RemotePresentationClient(argv: ["ssh", "buildbox", "present"], presentationVersion: version,
                                         transport: transport, effects: effects, now: { clock.now })
@@ -116,6 +122,46 @@ struct RemotePresentationClientTests {
         let answer = PresentationHello(version: 1, kinds: kinds, mode: mode)
         transport.deliver(line(.hello(answer), gen: gen, rev: 0))
         transport.deliver(line(.snapshot(snapshot ?? PresentationSnapshot(status: nil, hud: nil)), gen: gen, rev: 1))
+    }
+
+    @Test(arguments: [true, false])
+    func endedStopsTheClientForGoodWithoutAFailure(connectedFirst: Bool) {
+        let client = makeClient()
+        client.start()
+        if connectedFirst {
+            connect(client)
+        } else {
+            transport.deliver(line(.hello(PresentationHello(version: 1, kinds: ["status"], mode: .mirror)), rev: 0))
+        }
+        let reported = recorder.connections
+
+        transport.deliver(line(.ended, rev: connectedFirst ? 2 : 1))
+        transport.close("end of stream")
+        clock.now = clock.now.addingTimeInterval(3600)
+        client.tick()
+        client.retryNow()
+        client.tick()
+
+        #expect(recorder.ends == 1)
+        #expect(transport.links[0].stopped)
+        #expect(transport.launches.count == 1)
+        #expect(recorder.connections == reported)
+        #expect(recorder.warnings.isEmpty)
+        #expect(!client.originSupports("status"))
+    }
+
+    @Test func aPingGoesOnTheLinkAndItsAckReachesAcked() {
+        let client = makeClient()
+        #expect(!client.ping())
+        client.start()
+        connect(client)
+
+        #expect(client.ping())
+        transport.deliver(line(.ack, rev: 2))
+
+        #expect(transport.links[0].sent.last?.body == .ping)
+        #expect(recorder.acks == 1)
+        #expect(recorder.ends == 0)
     }
 
     @Test func startingLaunchesTheBridgeAndOpensWithHello() throws {
@@ -147,6 +193,59 @@ struct RemotePresentationClientTests {
         transport.deliver(line(.pendingCommit, rev: 2 + chunks.count))
 
         #expect(recorder.asks == asks)
+    }
+
+    private func leadReports(_ link: Link?) -> [Set<UUID>] {
+        (link?.sent ?? []).compactMap { if case .leadReport(let report) = $0.body { Set(report.leaders) } else { nil } }
+    }
+
+    @Test(arguments: [true, false])
+    func theLeadSetIsReportedOnlyToAnOriginThatTakesIt(takes: Bool) {
+        let client = makeClient()
+        client.start()
+        let pane = UUID()
+        recorder.leads = [pane]
+
+        connect(client, kinds: ["status"] + (takes ? [PresentationHub.leadReportKind] : []))
+
+        #expect(leadReports(transport.links.last) == (takes ? [[pane]] : []))
+        #expect(client.claimsLead == takes)
+    }
+
+    @Test func theLeadSetIsReportedEmptyAndAgainOnlyWhenItChanges() {
+        let client = makeClient()
+        client.start()
+        let pane = UUID()
+        connect(client, kinds: [PresentationHub.leadReportKind])
+        #expect(!client.claimsLead)
+
+        client.refreshLeads()
+        client.tick()
+        recorder.leads = [pane]
+        client.tick()
+        client.refreshLeads()
+        recorder.leads = []
+        transport.deliver(line(.layout(PresentationLayout(panes: [pane], primary: pane, axis: nil, shown: false)), rev: 2))
+
+        #expect(leadReports(transport.links.last) == [[], [pane], []])
+        #expect(!client.claimsLead)
+    }
+
+    @Test func aNewLinkReportsTheLeadSetAgain() {
+        let client = makeClient()
+        client.start()
+        let pane = UUID()
+        recorder.leads = [pane]
+        connect(client, kinds: [PresentationHub.leadReportKind])
+
+        transport.close("gone")
+        clock.now = clock.now.addingTimeInterval(60)
+        client.tick()
+        connect(client, gen: 8, kinds: [PresentationHub.leadReportKind])
+
+        #expect(transport.links.count == 2)
+        #expect(leadReports(transport.links.first) == [[pane]])
+        #expect(leadReports(transport.links.last) == [[pane]])
     }
 
     @Test func chunksALostStreamLeftUncommittedApplyNothing() throws {
@@ -238,6 +337,30 @@ struct RemotePresentationClientTests {
 
         #expect(recorder.modes == [.mirror])
         #expect(recorder.connections.last == .connected)
+    }
+
+    @Test func aVacancyMakesARefusedMirrorAskAgain() {
+        let client = makeClient()
+        client.start()
+        connect(client, mode: .presenter)
+        transport.deliver(line(.presenterRefused, rev: 2))
+
+        transport.deliver(line(.presenterVacant, rev: 3))
+        transport.deliver(line(.presenterGranted, rev: 4))
+
+        #expect(transport.links[0].sent.map(\.body).filter { $0 == .presenterAcquire }.count == 2)
+        #expect(recorder.modes == [.mirror, .presenter])
+    }
+
+    @Test func aVacancyLeavesThePresenterAlone() {
+        let client = makeClient()
+        client.start()
+        connect(client, mode: .presenter)
+        transport.deliver(line(.presenterGranted, rev: 2))
+
+        transport.deliver(line(.presenterVacant, rev: 3))
+
+        #expect(transport.links[0].sent.map(\.body).filter { $0 == .presenterAcquire }.count == 1)
     }
 
     // regression: a replacement client after soft close and undo left the row reading presenter when refused

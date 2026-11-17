@@ -149,10 +149,9 @@ public final class AppStore {
     @ObservationIgnored var pendingCloseTasks: [UUID: Task<Void, Never>] = [:]
 
     @ObservationIgnored let persistence: PersistenceStore
-    /// catalogOperations is agterm-server's operation table, written in every save of this store; nil on a Mac.
+    /// catalogOperations is the operation table of the catalog this store serves, written in every save; nil before its first operation.
     @ObservationIgnored public var catalogOperations: CatalogOperationTable?
-    /// catalogMirrored is set once a remote window's store holds its server's catalog; until then its saved view
-    /// state is the only record of how this Mac showed the rows.
+    /// catalogMirrored is set once a remote window's store holds its first catalog; until then its saved view state is kept.
     @ObservationIgnored public internal(set) var catalogMirrored = false
     /// catalogState is a remote window's connection to its server, nil for a local window. Observed: the window
     /// strip draws it.
@@ -175,6 +174,7 @@ public final class AppStore {
     @ObservationIgnored public internal(set) var snapshotUnsaved = false
     @ObservationIgnored let recentClosedStore: RecentClosedStore?
     @ObservationIgnored var recentClosedDidChange: (() -> Void)?
+    @ObservationIgnored var recentClosedWindow: UUID?
     @ObservationIgnored let controlEventSink: ((ControlEventDraft) -> Void)?
     /// The settled selected-pane identity per session that `pane.focused` diffs against.
     @ObservationIgnored var paneFocusBaseline: [UUID: UUID] = [:]
@@ -398,9 +398,10 @@ public final class AppStore {
                                               visible: surface.isVisible(in: session),
                                               backedByZmx: session.zmxBacking(for: surface),
                                               lead: ZmxLeadBook.shared.role(pane: pane),
-                                              reconnect: RemoteReconnectBook.shared.readback(pane: pane),
+                                              reconnect: RemoteReconnectBook.shared.readback(pane: pane), attachEnded: attachEnded(pane),
                                               paneID: token?.isEmpty == false ? token : nil,
-                                              pendingMessages: pendingMessages(session, pane: pane, token: token))
+                                              pendingMessages: pendingMessages(session, pane: pane, token: token),
+                                              remote: remotelyPresented(session, pane: pane))
                 }
                 return ControlSessionNode(id: session.id.uuidString, name: session.displayName,
                                           cwd: (session.content == .page ? parent(of: session) : nil)?.effectiveCwd
@@ -443,7 +444,7 @@ public final class AppStore {
                                           statusBlink: idle ? nil : (session.agentIndicator.blink ? true : nil),
                                           statusColor: idle ? nil : session.agentIndicator.color,
                                           statusShape: idle ? nil : session.agentIndicator.shape?.rawValue,
-                                          statusChangedAt: session.statusChangedAt?.timeIntervalSince1970,
+                                          statusChangedAt: session.statusChangedAt?.timeIntervalSince1970, activePanes: activePanes(of: session),
                                           background: session.backgroundWatermark,
                                           paneBackgrounds: session.paneBackgrounds.isEmpty ? nil : session.paneBackgrounds,
                                           unseen: session.unseenCount > 0 ? session.unseenCount : nil,
@@ -617,7 +618,7 @@ public final class AppStore {
         disableFocusIfSelectionOutsideSet(sessionID)
         if let sessionID { markSeen(sessionID) }
         clearAutoResetIndicator(sessionID)
-        clearAutoResetIndicator(previous)
+        if previous != sessionID { clearAutoResetIndicator(previous) }
         recordRecency()
         scheduleSave()
         return destinationIndicator

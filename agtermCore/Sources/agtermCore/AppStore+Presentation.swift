@@ -15,7 +15,10 @@ public enum NotificationOrigin: String, Sendable {
 extension AppStore {
     /// The replaceable presentation state a viewer of `id` starts from. Empty for an unknown session.
     public func presentationSnapshot(forSession id: UUID, now: Date = Date()) -> PresentationSnapshot {
-        guard let session = session(withID: id) else { return PresentationSnapshot(status: nil, hud: nil) }
+        // a session in its undo grace keeps its viewers, so one reconnecting then still gets its state
+        guard let session = session(withID: id) ?? pendingCloseSession(withID: id) else {
+            return PresentationSnapshot(status: nil, hud: nil)
+        }
         return PresentationSnapshot(status: presentationStatus(of: session),
                                     hud: presentationHud(of: session, now: now), context: session.context,
                                     layout: presentationLayout(of: session), info: session.info.map(Self.presentationInfo),
@@ -113,7 +116,9 @@ extension AppStore {
                                   shape: indicator.shape,
                                   pane: presentationStatusPane(indicator.statusPane, of: session),
                                   changedAt: session.statusChangedAt?.timeIntervalSince1970,
-                                  autoReset: indicator.autoReset ? true : nil)
+                                  autoReset: indicator.autoReset ? true : nil,
+                                  activePanes: StatusPane.allCases.filter { session.paneActivity[$0] != nil }
+                                      .map { presentationStatusPane($0, of: session) })
     }
 
     /// A status owner as the stable identity a viewer can follow across a swap or promotion on either Mac.
@@ -127,12 +132,11 @@ extension AppStore {
         }
     }
 
-    /// presentStatusSoundRemotely hands a status sound to the session's presenter when the status pane follows
+    /// presentStatusSoundRemotely hands a status sound to the viewer leading the status pane when that pane follows
     /// remotely. False when playback must stay on this Mac.
     public func presentStatusSoundRemotely(_ sound: PresentationSound, in session: Session, pane: StatusPane?) -> Bool {
-        guard let hub = presentationHub, hub.hasPresenter(session: session.id),
-              case .identity(let identity) = presentationStatusPane(pane, of: session),
-              presentsRemotely(session, paneIdentity: identity) else { return false }
-        return hub.sendToPresenter(.sound(sound), session: session.id)
+        guard let hub = presentationHub, case .identity(let identity) = presentationStatusPane(pane, of: session),
+              let owner = remoteRecipient(session, paneIdentity: identity) else { return false }
+        return hub.send(.sound(sound), toOwner: owner)
     }
 }

@@ -108,6 +108,9 @@ public struct RemotePresentationState: Equatable, Sendable {
     public var connection: RemotePresentationConnection
     public var mode: PresentationMode = .mirror
     public internal(set) var layout: PresentationLayout?
+    /// originEnded is set once the origin said it removed the session for good. Unlike `Session.ended`, which a
+    /// catalog or headless row keeps, the row itself is on its way out.
+    public internal(set) var originEnded = false
     var heldPanes: Set<UUID> = []
     /// Whether the glyph on the row is the bridge's. A flag and not a comparison of values: a pane swap
     /// rewrites the indicator without changing who set it, and a local write of the very same value does
@@ -116,6 +119,9 @@ public struct RemotePresentationState: Equatable, Sendable {
     /// False when the origin named a pane this Mac has no counterpart for: one the attach never mapped,
     /// one closed here since, or the origin's scratch. The glyph then carries no local owner.
     public internal(set) var statusOwnerResolved = true
+    /// activePanes is the origin's list of panes still reporting work, kept as origin panes so it follows a swap or
+    /// promotion here; nil when an older origin sends none. It describes the bridged glyph only.
+    var activePanes: [PresentationPane]?
     /// Whether the live HUD was opened by the bridge. Cleared whenever the HUD is discarded, so a panel the
     /// viewer's own program opens afterwards is never the bridge's to close.
     public internal(set) var hudBridged = false

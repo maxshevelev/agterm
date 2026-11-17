@@ -184,6 +184,31 @@ final class RecentClosedTests {
         #expect(loaded[0].workspace?.focusMember == true)
     }
 
+    @Test func anEntrySavedWithoutAWindowStillDecodes() throws {
+        let data = try JSONEncoder().encode(RecentClosedState(items: [workspaceItem(title: "work")]))
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"window\""))
+        try data.write(to: fileURL)
+
+        let loaded = RecentClosedStore(directory: directory).load()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].window == nil)
+    }
+
+    @Test func aWindowClearKeepsOtherWindowsAndRemoteEntries() {
+        let store = RecentClosedStore(directory: directory)
+        let mine = UUID(), other = UUID()
+        store.record(workspaceItem(title: "a", window: mine))
+        let kept = workspaceItem(title: "b", window: other)
+        store.record(kept)
+        store.recordRemote(RemoteRecentClosedItem(host: "box", originSessionID: "o1", name: "remote",
+            placement: .init(workspaceID: UUID(), workspaceName: "w", workspaceIndex: 0, sessionIndex: 0, parentID: nil)))
+
+        store.clear(window: mine)
+
+        #expect(store.load().map(\.id) == [kept.id])
+        #expect(store.loadRemote().map(\.originSessionID) == ["o1"])
+    }
+
     // the persisted pin comes back, but nothing is armed — a reopen cannot execute a sticky override
     // mid-process.
     @MainActor
@@ -276,6 +301,37 @@ final class RecentClosedTests {
         #expect(item.session?.snapshot.page?.source == .url(g.url))
         #expect(g.store.restoreRecentClosed(item))
         g.expectReopenedWhole()
+    }
+
+    @MainActor
+    @Test func aReopenedSessionAndItsCompanionAreNoLongerEnded() throws {
+        let (store, recentClosed, _) = makeStoreWithRecentClosed()
+        let ws = store.addWorkspace(name: "work")
+        let parent = try #require(store.addSession(toWorkspace: ws.id, cwd: "/a"))
+        let companion = try store.addCompanion(to: parent.id, options: CompanionOptions(cwd: "/c")).get()
+        store.closeSession(parent.id)
+        #expect(PresentationEnds.shared.contains(parent.id) && PresentationEnds.shared.contains(companion.id))
+
+        #expect(store.restoreRecentClosed(try #require(recentClosed.load().first)))
+
+        #expect(!PresentationEnds.shared.contains(parent.id))
+        #expect(!PresentationEnds.shared.contains(companion.id))
+    }
+
+    @MainActor
+    @Test func aReopenedWorkspacesSessionsAreNoLongerEnded() throws {
+        let (store, recentClosed, _) = makeStoreWithRecentClosed()
+        let ws = store.addWorkspace(name: "work")
+        let first = try #require(store.addSession(toWorkspace: ws.id, cwd: "/a"))
+        let second = try #require(store.addSession(toWorkspace: ws.id, cwd: "/b"))
+        _ = store.addWorkspace(name: "other")
+        store.removeWorkspace(ws.id)
+        #expect(PresentationEnds.shared.contains(first.id) && PresentationEnds.shared.contains(second.id))
+
+        #expect(store.restoreRecentClosed(try #require(recentClosed.load().first { $0.kind == .workspace })))
+
+        #expect(!PresentationEnds.shared.contains(first.id))
+        #expect(!PresentationEnds.shared.contains(second.id))
     }
 
     @MainActor
@@ -482,7 +538,7 @@ final class RecentClosedTests {
         )
     }
 
-    private func workspaceItem(id: UUID = UUID(), snapshotID: UUID = UUID(), title: String) -> RecentClosedItem {
+    private func workspaceItem(id: UUID = UUID(), snapshotID: UUID = UUID(), title: String, window: UUID? = nil) -> RecentClosedItem {
         RecentClosedItem(
             id: id,
             kind: .workspace,
@@ -495,7 +551,8 @@ final class RecentClosedTests {
                     sessions: [SessionSnapshot(id: UUID(), customName: "api", cwd: "/tmp")]
                 ),
                 selectedSessionID: nil
-            )
+            ),
+            window: window
         )
     }
 }

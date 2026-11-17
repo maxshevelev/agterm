@@ -391,6 +391,15 @@
 <pre class="bash"><code>brew install --cask umputun/apps/agterm</code></pre>
 <p>The cask also installs the <code>agtermctl</code> command-line tool, so cask users do not need the in-app installer for it.</p>
 <p><strong>Direct download.</strong> Download the latest <code>.dmg</code> from the <a href="https://github.com/umputun/agterm/releases">releases page</a>, open it, and drag agterm.app into <code>/Applications</code>.</p>
+<h3 id="install-updates">Updates</h3>
+<p>On its second launch a published release asks once whether to check for updates automatically; allowed, it checks once a day. <strong>agterm ▸ Check for Updates…</strong> checks at once either way. A Homebrew install updates itself the same way, and <code>brew upgrade</code> acts only when the cask is newer than the installed app. A build you make yourself never updates itself.</p>
+<ul>
+<li>A version a background check finds while you work shows as a blue arrow at the right end of the title bar; right after launch, or when you come back after a while away, agterm opens the update window instead. Click the arrow for the release notes and Install.</li>
+<li>With <strong>Update available</strong> off in <a href="#settings-interface">Settings ▸ Interface</a>, or the toolbar hidden, a new find opens the update window. Turning it off while the arrow shows only hides the arrow: the update waits for <strong>Check for Updates…</strong>.</li>
+<li>Installing asks to restart. With <a href="#restore-live">Live sessions</a> the dialog says your sessions keep running and reconnect; otherwise it says which shells end. <strong>Later</strong> keeps agterm open, and the next quit asks again.</li>
+<li>Started with a custom <code>AGTERM_STATE_DIR</code>, agterm comes back without it after the restart; reopen it with the same <code>AGTERM_STATE_DIR</code> to reconnect, as the dialog says.</li>
+<li><code>agtermctl update check</code> checks from a script with no alert of its own and opens the update window only when there is something to install; <code>agtermctl version</code> shows whether checks are automatic and when the last one ran.</li>
+</ul>
 <h3 id="install-help">Optional Help-menu installers</h3>
 <p>None is needed to use agterm as a terminal; each connects it to a wider workflow, and you can run any of them later. The first launch on a Mac points them out in a welcome dialog that offers the skill and the status hooks and never appears again.</p>
 <table>
@@ -504,8 +513,9 @@ Two parents, each with its companions indented under it; the blocked <code>logs<
 </figcaption>
 </figure>
 <ul>
-<li>The parent's disclosure triangle folds its companions away. A folded parent shows a small marker when a hidden companion is blocked, completed or has unread notifications.</li>
-<li>Companions reorder only among themselves, and moving the parent carries them.</li>
+<li>The parent's disclosure triangle folds its companions away. A folded parent shows a small stack marker while a hidden companion has an agent status, in that status's color; blocked wins over working, working over completed, and the marker's tooltip lists each companion's status. A hidden companion's unread notifications count in its workspace's badge.</li>
+<li>Drag a companion among its siblings to reorder it, or onto another top-level session, or into that session's companions, to move it under that session, in any workspace of the window. <strong>Move to</strong> in a companion's context menu lists the window's other top-level sessions. From a script: <code>agtermctl session move --parent SID [--index N]</code>. In the flagged view a drag never changes a companion's parent; use Move to there.</li>
+<li>Moving the parent carries its companions.</li>
 <li>Closing a companion closes only it. Closing the parent closes the group, and one Reopen Closed Item brings it all back.</li>
 <li>While a parent has companions, its shell exiting starts a fresh shell in the same directory instead of closing the session; one that exits again within 2 seconds closes the group. A Mac viewing that session attaches to the new shell.</li>
 <li>Flat lists (the ⌃P palette, the Ctrl-Tab switcher, the Dock menu and the Attach Remote picker) label a companion <code>parent › child</code>; the tree, rename and Copy Name keep the bare name.</li>
@@ -551,6 +561,7 @@ agtermctl session overlay open --html report.html --page</code></pre>
 <ul>
 <li>New Companion and Duplicate as Companion ask that Mac to create the companion under its own session and attach it here. Closing it here only detaches it.</li>
 <li>Convert to Companion runs on that Mac, and its new parent attaches here.</li>
+<li>A companion moves only under another session from that Mac: when the parent changes, that Mac moves it under its own session first, then the row moves here; a reorder under the same parent stays here. Another Mac attached to the same sessions keeps the old grouping until it attaches them again.</li>
 <li>A page companion opened there is that Mac's page, shown here through its own channel; it stays there when you close it here.</li>
 </ul>
 <h3 id="workspaces-finder">Opening sessions from Finder</h3>
@@ -635,6 +646,7 @@ agtermctl session overlay open --html report.html --page</code></pre>
 <p>A split is one session with two terminals, sharing one sidebar row.</p>
 <ul>
 <li>⌘D splits side by side, ⌘⇧D top and bottom. The other shortcut turns a shown split to its axis; the current one hides the split without closing the second shell.</li>
+<li>⌥⌘← and Ctrl-1 focus the left or top pane, ⌥⌘→ and Ctrl-2 the right or bottom one. On a hidden split they swap which pane is shown. <code>agtermctl session focus</code> with no pane switches to the other one.</li>
 <li>The divider follows the axis and remembers its position. Drag it to resize, double-click it for an even split.</li>
 <li><strong>Close Split</strong> in the action palette ends the second pane, whatever it is running.</li>
 <li><strong>Swap Panes</strong> (View or the action palette) exchanges the two terminals without restarting them. The primary and split roles follow the positions, focus follows its terminal, and the divider stays put. <code>agtermctl session swap</code> does the same, also while the split is hidden.</li>
@@ -773,7 +785,7 @@ The action palette over a split session. Attach Remote is greyed out: listed, bu
           <!-- REMOTE SERVER -->
           <section id="remote-sessions" class="doc-v2" style="scroll-margin-top: 88px; padding-top: 56px">
 <h2>Remote sessions</h2>
-<p>Open a session that runs on another Mac in this sidebar, as a row marked remote, splits and companions included. Its programs keep running over there; this Mac shows them at its own window size. For sessions on a Linux host, see <a href="#remote-server">Remote server</a>, which shows them in a remote window instead.</p>
+<p>Open a session that runs on another Mac in this sidebar, as a row marked remote, splits and companions included. Its programs keep running over there; this Mac shows them at its own window size. For sessions on a Linux host, see <a href="#remote-server">Remote server</a>, which shows them in a remote window instead; a remote window can also show a whole window of another Mac (<a href="#remote-window-mac">A window of another Mac</a>).</p>
 <h3 id="remote-sessions-setup">Set up the other Mac</h3>
 <ul>
 <li>agterm runs in <strong>Live sessions</strong> mode there (<a href="#restore-live">Restore</a>), which keeps a live program behind each pane. A page session needs no live program.</li>
@@ -829,6 +841,7 @@ s=$(agtermctl zmx tree studio.local --json \
 <li>On the other Mac, those panes are covered with a note that they are in use elsewhere. A key press on the cover, or <code>agtermctl session lead</code>, takes the lead back and covers the pane here.</li>
 <li>Scripts typing into a covered pane on the other Mac still work, and so do their screen reads: both go through the session, not the covered view.</li>
 <li>Closing the session here uncovers the panes over there.</li>
+<li>In a <a href="#remote-window-mac">window of another Mac</a>, this Mac takes the lead when you open the window, in the rows you create, reopen or bring back with undo from here, and in the new pane of a split you add from here; the row's other pane keeps its leader. A reconnect, a relaunch, and rows created on the other Mac leave the lead where it is.</li>
 <li>Both Macs need an agterm with this behavior; against an older one the session arrives at the other Mac's size until you type.</li>
 <li>While another Mac leads at a different size, cursor and screen-text reads here can disagree with the program's layout. Automation that relies on them is unsupported in that state.</li>
 </ul>
@@ -852,7 +865,7 @@ s=$(agtermctl zmx tree studio.local --json \
 </tr>
 <tr>
 <td>status</td>
-<td>clearing the row's status or badge here (typing, selecting, Clear Status) clears it there too, under that Mac's reset settings, when the status came from there; a status set on this Mac's row clears here only</td>
+<td>clearing the row's status or badge here (typing, selecting, Clear Status) clears it there too, under that Mac's reset settings, when the status came from there; a status set on this Mac's row clears here only, and one pane here finishing leaves the other Mac's active shown</td>
 </tr>
 <tr>
 <td>session context</td>
@@ -874,25 +887,30 @@ s=$(agtermctl zmx tree studio.local --json \
 <h3 id="remote-sessions-origin">What runs on the other Mac</h3>
 <p>Commands that change the session run on the Mac it came from, and the result attaches here:</p>
 <ul>
-<li>Duplicate Session, a new split and Close Split, Convert to Companion;</li>
+<li>Duplicate Session, a new split and Close Split, Convert to Companion, moving a companion under another session;</li>
 <li>the scratch terminal, refused while the row is not connected or when the other Mac's agterm is too old to show its scratch;</li>
 <li><code>agtermctl session restart</code>, <code>zmx kill</code> and <code>session restore</code>; a session from agterm-server refuses <code>session restore</code>, since the server keeps every pane running.</li>
 </ul>
 <p>When the other Mac gives no answer, the request is reported as unknown and is never sent again or done here.</p>
 <p>Commands that only inherit the session's directory run here: a custom command, an overlay opened without <code>--cwd</code>, the quick terminal, and New Session set to open in the current directory. They start in the other Mac's reported directory when that path exists here, else in your home. A custom command still sees the reported path in <code>$AGT_SESSION_PWD</code> and the host in <code>$AGT_SESSION_HOST</code> (empty for a local session).</p>
 <h3 id="remote-sessions-present">Questions, overlays and pages from the other Mac</h3>
-<p>The first attached Mac to ask presents the session while nobody else does; its row's <code>presentation</code> reads <code>mode: presenter</code>.</p>
+<p>The first attached Mac to ask presents the session while nobody else does; its row's <code>presentation</code> reads <code>mode: presenter</code>. When that Mac leaves, another attached Mac takes over without reconnecting, if it and the other Mac (or agterm-server) both run a current agterm.</p>
 <ul>
-<li>A question (<code>ask</code>) or program overlay that a program there opens is shown on the presenting Mac, where you are, while the other Mac follows another Mac's lead in that pane, or in every pane for one covering the whole session. Otherwise it stays over there, and one already open stays put when the lead changes.</li>
+<li>A question (<code>ask</code>, <code>pick</code>) or program overlay that a program there opens is shown on the attached Mac leading its pane, the one you last typed in; one covering the whole session follows the other Mac's main pane. When no attached Mac leads that pane, the presenting Mac shows it.</li>
+<li>When the other Mac is a Mac rather than agterm-server, this happens only while that pane follows another Mac's lead there; while you work at the other Mac itself, it stays there.</li>
+<li>A question or page already open follows the lead too: it moves to the Mac you now type in, or back to the other Mac when you type there. A dialog moving to an attached Mac waits there until that Mac can show it; one coming back waits on its old Mac until the other Mac can, for example once a picker closes, the session is selected or a dashboard closes. A page an attached Mac refuses stays where it is and is offered again the next time the lead moves. Moving a dialog clears text typed into it and a picker's filter, and moving a page reloads it. A program overlay stays on the Mac it started on.</li>
+<li>A Mac leading one of the session's panes also opens clicked pages and clears the status, as the presenting Mac does. With an older agterm on either side, everything goes to the presenting Mac.</li>
+<li>The tree tells you where the next one goes: <code>remote</code> on the other Mac's pane reads <code>true</code> when it opens on an attached Mac, and <code>presenters.viewers</code> counts the attached rows showing the session (<code>viewed by</code> in <code>agtermctl tree</code>).</li>
 <li>The answer or exit status still reaches the program over there. A handed-over overlay's program runs once, on the other Mac, inside an ssh terminal this Mac opens for it.</li>
+<li>When this Mac goes away, a question or page it showed moves to the attached Mac that would take a new one, or back to the other Mac when none can; a page's result stays open while it moves. A dialog the other Mac cannot show then ends cancelled with <code>presentation-lost</code>, and a page with no free place there ends dismissed. A page whose connection drops after it loaded is shown once more.</li>
 <li>If this Mac refuses a question, it goes back to the other Mac. An overlay this Mac cannot show fails rather than opening over there. Closing such an overlay from a script asks it to end, and its result says how it did.</li>
-<li>A status sound follows the same condition, for the pane that set the status: it plays on the presenting Mac while another Mac leads that pane, with the presenting Mac's own blocked sound.</li>
+<li>A status sound follows the same rule, for the pane that set the status: it plays on the attached Mac it goes to, with that Mac's own blocked sound.</li>
 </ul>
-<p><strong>Pages</strong> follow the same condition and open on the presenting Mac:</p>
+<p><strong>Pages</strong> follow the same rule, and below, "this Mac" is the Mac a page opened on:</p>
 <ul>
 <li>A file page reads its files from the other Mac as needed, and its buttons and scripts act on the other Mac's session, so a page that answers its caller answers the program over there. Finder and browser are refused for it, since the file is not on this Mac.</li>
 <li>A web page loads directly here; with <code>--persistent</code> it uses this Mac's saved browser storage. A <code>localhost</code> page names a server on the other Mac, so it loads through an ssh forward from this Mac; an agterm here too old to forward refuses it.</li>
-<li>A picture, markdown or text page (<code>--image</code>, <code>--markdown</code>, <code>--text</code>) is fetched and built here. A markdown page follows its links to the other Mac's files (an older agterm here keeps them as text), and a picture opened without a size is sized for this screen, so an agent there can show you its screenshot. An agterm here too old for these pages refuses the open.</li>
+<li>A picture, markdown or text page (<code>--image</code>, <code>--markdown</code>, <code>--text</code>) is fetched and built here. A markdown page follows its links to the other Mac's files (an older agterm here keeps them as text), and a picture opened without a size is sized for this screen, so an agent there can show you its screenshot. An agterm here too old for these pages refuses the open. <code>session overlay expand</code> from the other Mac lays out a JSON Lines page here as it would locally; an agterm here too old for it refuses the command.</li>
 <li>A log page follows the file over there. <code>session overlay follow</code>, <code>search</code>, <code>wrap</code> and <code>changes</code> from the other Mac act on the page here and answer as they would locally; what you do in the page's bar reads back there. An agterm here too old for live text pages refuses a log page, opens a clicked log as a plain page, and refuses those commands.</li>
 <li>Closing the page from a script over there takes it down here; reloading asks this Mac to do it.</li>
 </ul>
@@ -906,14 +924,14 @@ s=$(agtermctl zmx tree studio.local --json \
 <li>a handed-over question goes back to the other Mac, a finished overlay held open with <code>--wait</code> closes, and a running overlay keeps running until its program ends.</li>
 </ul>
 <p>Close and reattach the session to retry by hand.</p>
-<p><strong>A pane's ssh connection.</strong> The pane keeps its last screen.</p>
+<p><strong>A pane's ssh connection.</strong> The pane keeps its last screen, and what happened shows in a small panel at the bottom of the pane rather than as terminal text.</p>
 <ul>
-<li>If ssh itself failed (exit 255, which a refused login also gives), a bar under the pane names the host and says it is reconnecting. agterm attaches again once the host answers, on the stream's schedule; any key, waking the Mac or a network change retries at once and restarts the schedule. ⌘W still closes the session.</li>
-<li>While the host keeps refusing, a line along the pane's bottom edge shows what ssh said last, such as a changed host key or a rejected login.</li>
-<li>When the host answers, the last screen is replaced before the new connection is up, so a link that drops again right away leaves an empty pane with only the bar.</li>
+<li>If ssh itself failed (exit 255, which a refused login also gives), the panel reads <strong>Connection to HOST lost</strong> and says it is reconnecting. agterm attaches again once the host answers, on the stream's schedule; any key, waking the Mac or a network change retries at once and restarts the schedule. ⌘W still closes the session.</li>
+<li>While the host keeps refusing, the panel adds what ssh said last, such as a changed host key or a rejected login.</li>
+<li>When the host answers, the last screen is replaced before the new connection is up, so a link that drops again right away leaves an empty pane with only the panel.</li>
 <li>The pane comes back without taking the lead: if the other Mac leads by then, it arrives covered. It also arrives covered while the other Mac still counts this Mac's dropped connection as leader, which clears once that connection times out.</li>
-<li>Any other exit prints one line naming the host, session, pane and exit status, and waits for a key.</li>
-<li>If the other Mac removes the session, its replica here closes without waiting for a key, even over a disconnect prompt. The last replica waits for its ssh to exit and may then close the row.</li>
+<li>Any other exit shows <strong>SESSION on HOST ended</strong>; any key closes the pane.</li>
+<li>If the other Mac closes the session, the row here closes by itself with no panel, whether it is open now or comes back at the next launch. A session closed there with undo keeps its row here until the undo window passes; undo there leaves it as it was.</li>
 </ul>
 <p><strong>Keepalive.</strong> When your ssh config sets no <code>ServerAliveInterval</code> for the host, or sets 0, agterm adds <code>ServerAliveInterval 5</code> and <code>ServerAliveCountMax 2</code>, so a dead connection is noticed within about 15 seconds. Set a large value to opt out. A connection that joins an existing ControlMaster ignores these; the master's settings decide.</p>
 </section>
@@ -972,6 +990,18 @@ s=$(agtermctl zmx tree studio.local --json \
 <h3 id="remote-window">Open a remote window</h3>
 <p><strong>File ▸ Open Remote Window…</strong> offers the hosts in <code>remotes.conf</code>, the same list Attach Remote… reads, and opens the only one without asking. It is the <code>open_remote_window</code> keymap action, with no default key. <code>agtermctl window remote open HOST</code> does the same and prints the window id. A window already showing that host is raised rather than opened twice.</p>
 <p>The sidebar is the server's: creating, renaming, splitting, moving and closing sessions and workspaces happen on the server. Selection, focus, font size, split dividers and the window frame stay on this Mac.</p>
+<h3 id="remote-window-mac">A window of another Mac</h3>
+<p>The host can also be a Mac running agterm in Live sessions mode. The remote window then shows one window of that Mac, and everything on this page about a remote window applies, with that Mac in the server's place. A Mac with one open window opens it at once; with several, the same picker asks which. From a script, <code>agtermctl window remote open HOST --origin-window W</code> names it by id or unique prefix; without it, a Mac with several open windows is refused with their names.</p>
+<ul>
+<li>Changes made here happen in that Mac's window, even while someone works in it. They never change the selection there, except that closing the selected row selects another, as it would locally.</li>
+<li>A Mac not in Live sessions mode is refused before any window opens.</li>
+<li>Rows that Mac attached from a third Mac are not shown. A workspace holding such rows cannot be deleted from here; the refusal says how many it holds.</li>
+<li>Recent Closed, Reopen Closed Item and Clear Menu use the list of that one window. The other Mac's own File ▸ Open Recent still lists every window.</li>
+<li>Asks, picks and page questions follow the rules of an <a href="#remote-sessions-present">attached session</a>.</li>
+<li>A pane stopped on that Mac shows its end here and is not attached again while it stays stopped; a session whose every pane stopped reads <strong>Ended on HOST</strong>.</li>
+<li>A hidden split on that Mac whose shell exits by itself can still read as running here until that window's panes change, an action is sent from here, or this Mac reconnects.</li>
+<li>On that Mac, <code>agtermctl window list</code> and <code>tree</code> report <code>catalogViewers</code> on the window: how many Macs show it. Nothing on its screen marks it.</li>
+</ul>
 <h3 id="remote-server-where">What runs where</h3>
 <table>
 <colgroup>
@@ -1145,6 +1175,7 @@ The Interface tab: title-bar and sidebar controls, plus the quick terminal's siz
 <ul>
 <li><strong>Workspace name</strong> shows before the session name, cut to 24 characters.</li>
 <li><strong>Hide overlays</strong> stays in place and is dimmed while the session has no overlay to hide.</li>
+<li><strong>Update available</strong> appears only while a background check has found a new version (<a href="#install-updates">Updates</a>).</li>
 <li><strong>Workspace add-session</strong> is the + shown on a workspace row on hover.</li>
 <li>Hiding <strong>Workspace icons</strong> or <strong>Session icons</strong> gives names more room, and takes what the icon shows with it: a session's split, flag fill, remote cloud, page glyph and icon-only tint, and a workspace's focus mark. A remote session's connection notice then shows when you hover its name.</li>
 <li>Hiding <strong>Workspace chevrons</strong> moves every row left into their space; a workspace row then gives no sign of being folded.</li>
@@ -1998,7 +2029,7 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 <li>the page may go on to other sites, and its strip always names the site shown.</li>
 </ul>
 <p>With a Session overlay choice selected, outside a program that captures the mouse, ⌘⇧-click sends that one link to the browser; use Shift-click to extend a selection. In a program that captures the mouse, ⌘⇧-click is the ordinary link click and follows the setting.</p>
-<p>The link still opens in the browser when it sits in a HUD, when a HUD is up on the session, when the terminal is zoomed, when the session already has an overlay, or in the quick terminal. So does a plain http link to anything but a local address (localhost, a <code>.local</code> name, an IP address), which the overlay could not load. One exception: a page an earlier click opened and you then hid with ⇧⌘J is replaced by the new link and shown.</p>
+<p>The link still opens in the browser when it sits in a HUD, when a HUD is up on the session, when the terminal is zoomed, when the session already has an overlay, or in the quick terminal. So does a plain http link to anything but a local address (localhost, a <code>.local</code> name, a private or link-local IP address), which the overlay could not load. One exception: a page an earlier click opened and you then hid with ⇧⌘J is replaced by the new link and shown.</p>
 <h4 id="links-files">Local files</h4>
 <p>A ⌘-click on a local path opens it over its session. The path can be plain output, such as <code>/tmp/shot.png</code> or <code>~/notes.md</code>, or a <code>file://</code> link of the kind <code>ls --hyperlink</code>, eza and many compilers print.</p>
 <table>
@@ -2032,6 +2063,10 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 <tr>
 <td><code>.diff</code>, <code>.patch</code></td>
 <td>a diff page that steps through changes</td>
+</tr>
+<tr>
+<td><code>.jsonl</code>, <code>.ndjson</code></td>
+<td>a JSON Lines page: one record per line as written, laid out on request</td>
 </tr>
 <tr>
 <td><code>.html</code>, <code>.htm</code></td>
@@ -2081,6 +2116,10 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 <td>wrap long lines</td>
 </tr>
 <tr>
+<td><code>e</code> or the Expand button</td>
+<td>JSON Lines: lay records out, or back as written</td>
+</tr>
+<tr>
 <td><code>F</code></td>
 <td>log: follow on or off</td>
 </tr>
@@ -2098,6 +2137,7 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 </tr>
 </tbody>
 </table>
+<p><strong>JSON Lines pages</strong> show the file as written, one record per line, colored as JSON. Expand lays every record out over indented rows, numbered by its line in the file, and keeps the record you were reading under the bar; the page keeps the choice until it closes. A line that is not a JSON object or array, or does not parse, stays as written, and so does a record that does not fit the page's 4 MB layout budget. A file over 4 MB does not open: the click reveals it in Finder. A <code>.jsonl</code> opened as a log (<code>--tail</code>, <code>--follow-file</code>) stays as written and has no Expand.</p>
 <p><strong>Log pages</strong> show the last 5,000 lines, read from the end so a log of any size opens, and follow the file as it grows. The bar shows whether it follows. Scroll up to pause; scroll back to the bottom or press Resume to follow again. A rotated or truncated log is picked up, and a missing one shows waiting until it returns. <code>app.log:120</code> opens the plain page at that line instead.</p>
 <figure>
 <img src="/assets/docs-page-diff.webp" alt="A patch shown as a diff page with change and file navigation, green and red bands for added and removed lines" width="760" height="535" loading="lazy">
@@ -2117,7 +2157,7 @@ A clicked <code>.md</code> file, rendered in the terminal's theme.
 <h4 id="links-session">Session links</h4>
 <p>A ⌘-click on an <code>agterm://session/&lt;id&gt;</code> link in a pane, split or scratch selects that session and raises its window, with no confirmation. Print one from a shell:</p>
 <pre class="bash"><code>printf &#39;\e]8;;agterm://session/%s\e\\%s\e]8;;\e\\\n&#39; &quot;$AGTERM_SESSION_ID&quot; &quot;back to this session&quot;</code></pre>
-<p>In Claude Code markdown, <code>[label](agterm://session/&lt;id&gt;)</code> does the same, since Claude Code prints it as a link (OSC 8); while Claude Code captures the mouse, use ⌘⇧-click. In a session attached from another Mac the id is that Mac's, and the click selects the one row here showing it; it never attaches anything or acts there.</p>
+<p>In Claude Code markdown, <code>[label](agterm://session/&lt;id&gt;)</code> does the same, since Claude Code prints it as a link (OSC 8); while Claude Code captures the mouse, use ⌘⇧-click. The bare <code>agterm://session/&lt;id&gt;</code> in plain text is a link too, so an agent that prints such a markdown link as plain text, such as Codex, still gives you one to ⌘-click. In a session attached from another Mac the id is that Mac's, and the click selects the one row here showing it; it never attaches anything or acts there.</p>
 <p>Nothing happens for an unknown or closed session; when the destination window is zoomed, has the dashboard open or a picker pending; for any other <code>agterm://</code> form; on a ⌘⌥-click; or for a link in a HUD, the quick terminal or a program overlay.</p>
 <h4 id="links-mouse">Links in programs that use the mouse</h4>
 <p>While a program has mouse reporting on, such as tmux with <code>mouse on</code> or stock vim, ⌘-hover underlines nothing and ⌘-click opens nothing: links are detected only while reporting is off. Ghostty.app does the same, per program.</p>
@@ -2238,19 +2278,21 @@ agtermctl session status idle --target &quot;$AGTERM_SESSION_ID&quot;       # cl
 <ul>
 <li><code>status</code> and <code>statusPane</code>, the pane that set it;</li>
 <li><code>statusColor</code> and <code>statusShape</code>, only while a per-call override is in effect;</li>
-<li><code>statusChangedAt</code>, epoch seconds of the last applied write. Every write counts, <code>idle</code> and a repeat of the same status included, and so do automatic and manual clears, so a script polling <code>tree</code> can tell how long ago the status was last written. It is absent before the first set and is not kept across a restart.</li>
+<li><code>activePanes</code>, the panes still reporting <code>active</code> (<code>left</code>, <code>right</code>, <code>scratch</code>), an empty list when none, whatever the row shows. A script waiting for one pane's agent reads this rather than <code>status</code>, which can show the other pane's work;</li>
+<li><code>statusChangedAt</code>, epoch seconds of the last applied write. Every write counts, <code>idle</code> and a repeat of the same status included, except one another pane's status keeps off the row, and so do automatic and manual clears, so a script polling <code>tree</code> can tell how long ago the status was last written. It is absent before the first set and is not kept across a restart.</li>
 </ul>
 <h3 id="status-pane">Which pane set it</h3>
 <ul>
 <li>A block set from a background pane survives typing in another pane.</li>
 <li>When the status needs you (blocked or completed), selecting the session reveals and focuses the pane that set it (the split, or a hidden scratch) instead of the main pane. That covers every way of selecting it: auto-follow, attention navigation ⌃⌥↑/↓, plain session navigation, the command palettes, a Dock-menu session and a sidebar click. An active status keeps the current pane. <code>agtermctl session go --to next-attention</code> only steps the selection and does not move focus into the pane.</li>
-<li>While a session is blocked, a status written from a different pane is refused unless it is another <code>blocked</code>. With an agent in each pane, one reporting its progress cannot erase the other's request for input. That holds for <code>idle</code> too, which the bundled agent hooks send on their own when an agent starts or finishes.</li>
+<li>While a session is blocked, a status written from a different pane does not replace the block unless it is another <code>blocked</code>. With an agent in each pane, one reporting its progress cannot erase the other's request for input. That holds for <code>idle</code> too, which the bundled agent hooks send on their own when an agent starts or finishes. The write is still accepted: it plays its sound, and the row shows that pane's work once the block ends.</li>
+<li>While one pane's agent is still working, the other pane finishing leaves the row active. When Codex in the split finishes a turn while Claude Code waits on a background command in the main pane, the row stays active until Claude Code finishes too.</li>
 <li>The pane that set the block changes it freely, typing into that pane clears it, and <strong>Clear Status</strong> in the sidebar row menu clears it from anywhere.</li>
 </ul>
 <h3 id="status-clear">Clearing it</h3>
 <ul>
 <li>Typing into a blocked or completed session clears its status, on the first key by default. <strong>Settings ▸ Agent Status ▸ Status reset</strong> can move that to <strong>On Enter</strong>, so a reply you started and walked away from keeps the glyph until you send it; Esc or Ctrl-C still clears a blocked one, since cancelling the prompt answers it. <strong>Disabled</strong> leaves the status to the agent's next hook or Clear Status.</li>
-<li>Esc or Ctrl-C interrupts an active session and clears its status, whatever the setting.</li>
+<li>Esc or Ctrl-C interrupts an active session and clears its status, whatever the setting. In a split it ends that pane's work only, so the row shows what the other pane still runs.</li>
 <li>To come back to a session later, <strong>Mark for Attention</strong> in its row menu gives an idle session a completed status that stays when you visit it, so attention navigation stops on it again. It never replaces a live status; typing in the session's main pane, Clear Status or the agent's next update clears it as usual.</li>
 </ul>
 <h3 id="status-attention">Finding the sessions that need you</h3>
@@ -2359,7 +2401,7 @@ agtermctl session tint clear --target &quot;$AGTERM_SESSION_ID&quot;</code></pre
 <h4 id="status-claude">Claude Code</h4>
 <ul>
 <li>When Claude Code runs as a worker under another agent with a shell between them, as in a tool call, its hooks stay silent, so the status of the pane that started it is not overwritten.</li>
-<li>A background subagent or workflow keeps the row working. Its activity lights an idle row but never replaces the main agent's status. While Claude Code (2.1.145 or later) reports one still running, Stop posts active instead of completed; completed comes from the Stop after the last one finishes.</li>
+<li>A background subagent or workflow keeps the row working. Its activity lights an idle row but never replaces the main agent's status. While Claude Code (2.1.145 or later) reports one, or a background shell, still running, Stop posts active instead of completed; completed comes from the Stop after the last one finishes, so a background server that never exits keeps the row active.</li>
 <li>Two gaps remain: the main agent's activity can replace a subagent's permission prompt, and when the key that answers that prompt leaves the block in place, the row stays blocked until the main agent's next event.</li>
 <li>After upgrading, restart agterm and run the install again: a running older app ignores the subagent's <code>--if-idle</code> and applies the write.</li>
 </ul>
@@ -2510,7 +2552,7 @@ Settings ▸ General ▸ Restore sessions. The note under it is a reminder that 
 <p>Without a supported shell or the bundled helper, agterm uses fresh shells and Settings says why. The shell is read at launch; running panes keep theirs until <a href="#restore-reset">Reset Live Sessions</a>.</p>
 <h4 id="restore-upgrade-and-switch-modes">Upgrade and switch modes</h4>
 <ul>
-<li><strong>Upgrade:</strong> install the new version (<code>brew upgrade --cask agterm</code>), quit, reopen. Panes reconnect. <code>agtermctl version</code> shows the installed version when it differs from the running one.</li>
+<li><strong>Upgrade:</strong> install the update when agterm offers it and restart (<a href="#install-updates">Updates</a>), or install the new version by hand (<code>brew upgrade --cask agterm</code>), quit, reopen. Panes reconnect. <code>agtermctl version</code> shows the installed version when it differs from the running one.</li>
 <li><strong>Switch to Live:</strong> current shells end at the next clean quit. The first Live launch restarts their commands where it can; shell state is lost.</li>
 <li><strong>Switch away from Live:</strong> after a restart, every detached live program in this state directory ends. If Live is still selected but cannot run, they are kept for a later launch.</li>
 </ul>

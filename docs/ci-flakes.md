@@ -169,6 +169,22 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   reproduces the message locally.
 - **Fix.** `LogClient` waits 60 s, as `Viewer` and `eventually` do; the same 11 s hold then passes.
 
+### `ServerControlSocketTests`: every case reads its reply one step late
+
+- **Symptom.** All four cases fail together: `reply.contains(...)` sees `""` and the next read gets that reply
+  (`echo == "echo:frame"` fails with the ok line), at the same instant 68 to 80 s into the run.
+- **Runs.** Jobs 133141445740 and 133146669623 (run 43820229578, PR #1016), on both attempts.
+- **Cause, demonstrated.** `ServerControlSocket.runBlocking` answered through a `Task` at the default priority,
+  and the pool runs same-priority jobs in arrival order. With coverage on, CI runs every test target in one
+  process, so the reply queued behind the startup backlog of test bodies on 3 threads and outlived the client's
+  60 s read. A probe queuing 3000 2 ms jobs got its reply when the last finished, 6.0 s under a one-thread pool
+  (`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`), and in 0.00 s with the jobs at background priority or the reply at
+  `.high`. Passing runs of other PRs had the socket suite end 49 to 73 s in, so the margin predates the PR.
+- **Fix.** `runBlocking` starts its task at `.high`, in agterm-server and in the app's `ControlServer`, each
+  pinned by a test that sends a request behind 600 queued same-priority jobs. `ControlAcceptLoopTests` also
+  parked `loop.next()` on the pool through `Task.detached`, which deadlocked the one-thread run; it runs on a
+  plain thread now.
+
 ### Linux test process killed by SIGPIPE
 
 - **Symptom.** The Linux core tests job ends with signal 13 about 6 s after `swift test` starts, before any test
@@ -188,6 +204,39 @@ Each entry separates a demonstrated cause from one that is only consistent with 
   zombie of that group under the container's PID 1 (`tail -f /dev/null`, which never reaps) kept the call
   succeeding forever.
 - **Fix.** Already on master in #949 (b8a96b1b): `OverlayRunJob.onlyZombies` treats a group of zombies as ended.
+
+### Hang in `HudHelperTests.exitsWhenTheOwningProcessIsGone`
+
+- **Symptom.** `swift test` stops printing after the Swift Testing summary; the test helper sits at 0% CPU in
+  `-[NSConcreteTask waitUntilExit]`, in `mach_msg`, and the owner `sh` it waits on is already reaped.
+- **Runs.** A local full run on 2026-11-17; not yet seen on CI, where the watchdog would kill it at 600 s.
+- **Cause, demonstrated.** The test launched the owner, crossed an `await`, then called `waitUntilExit`, which
+  waits on the current thread's run loop. A task can resume on another cooperative thread, and that run loop
+  never hears of the exit. A probe hung within 650 hopped runs; launching and waiting on one thread ran 2400 times
+  without a hang.
+- **Fix.** The test polls `isRunning` with `Task.sleep`; `Process` reaps on its own queue, so
+  `kill -0` sees the owner gone. 2400 hopped probe runs passed. Every other `waitUntilExit` in the tests runs and
+  waits on one thread with no `await` between.
+
+### `HudHelperTests` "hud.sh ignored SIGTERM" on Linux
+
+- **Symptom.** `keepsPaintingWhenTheOwnerFieldIsNotAPid(owner: "")` recorded `hud.sh ignored SIGTERM` from
+  `Run.stop()`, whose process listing showed the helper as a zombie (`Z`, `[sh] <defunct>`).
+- **Runs.** Job 133868067831 (run 44032643699, master `d79b72a0`); the identical tree passed on its PR.
+- **Cause, inferred.** `stop()` gave the helper 2 s of wall-clock time to be reaped. The run had the Linux startup
+  stall from the `SshConnectionPoolTests` entry: 6396 of 6464 passing tests reported over 20 s. The zombie shows
+  the helper had exited by the time of the listing, not that it exited within the 2 s.
+- **Fix.** Every wait in `HudHelperTests` counts 20 ms `Task.sleep` polls instead of a deadline, so a stall slows a
+  wait without expiring it, as `held()` does.
+
+### `AppDelegateCaptureTests.testExitCaptureReadsALiveListingSlowerThanAHundredMilliseconds`
+
+- **Symptom.** `XCTAssertEqual failed: ("0") is not equal to ("1")` at 0.408 s: the 120 ms stub listing
+  missed `ZmxClient.captureInvocationTimeout` (0.4 s) and no command was captured.
+- **Runs.** One local `make test-app` on 2026-11-17, load average about 21 at the time.
+- **Cause, not established.** Ten isolated runs passed in 0.19-0.28 s, and ten more passed under 20 busy-loop
+  processes (load average 113), so CPU contention alone did not reproduce it.
+- **Fix.** None yet.
 
 ### macOS watchdog hang with no test started
 

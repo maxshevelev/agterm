@@ -27,12 +27,23 @@ extension AppStore {
     /// `alreadyFinalized` names a pane whose daemon the CALLER has destroyed, so the teardown does not ask
     /// the finalizer to kill a name that is already gone. Only `zmx kill` passes one.
     func finalizePaneIdentities(_ sessions: [Session], alreadyFinalized: UUID? = nil) {
+        // before the kill below, so a viewer's `ended` is queued ahead of the attach exit the kill causes
+        endPresentations(of: sessions.map(\.id))
         // every pane, an attached one included: its daemon is not ours to kill, its lead state is
         for session in sessions {
-            ([session.paneIdentity] + [session.splitPaneIdentity].compactMap { $0 }).forEach(ZmxLeadBook.shared.forget)
+            ([session.paneIdentity] + [session.splitPaneIdentity].compactMap { $0 }).forEach {
+                ZmxLeadBook.shared.forget(pane: $0)
+                RemoteEndBook.shared.clear(pane: $0)
+            }
         }
         let identities = PaneIdentityInventory.identities(in: sessions).filter { $0 != alreadyFinalized }
         if !identities.isEmpty { paneFinalizer?(identities) }
+    }
+
+    /// endPresentations records `ids` as removed for good and ends their viewers' streams with `ended`.
+    func endPresentations(of ids: [UUID]) {
+        PresentationEnds.shared.record(ids)
+        presentationHub?.end(sessions: ids)
     }
 
     /// Every pane identity of `sessions` leaves mount eligibility. A hidden split's identity is included;
@@ -45,7 +56,7 @@ extension AppStore {
     /// Toggles the one-level split. With no axis this is the legacy preserve-axis hide/show operation. With
     /// an axis it is the axis-specific UI command: the same shown axis hides, another shown axis transposes,
     /// and a hidden or absent split is shown in the requested arrangement.
-    public func toggleSplit(_ sessionID: UUID, axis: SplitAxis? = nil) {
+    public func toggleSplit(_ sessionID: UUID, axis: SplitAxis? = nil, focusesNewSplit: Bool = true) {
         guard let session = session(withID: sessionID) else { return }
         let show: Bool
         if let axis {
@@ -54,18 +65,19 @@ extension AppStore {
         } else {
             show = !session.isSplit
         }
-        setSplitVisibility(session, shown: show)
+        setSplitVisibility(session, shown: show, focusesNewSplit: focusesNewSplit)
     }
 
     /// Idempotently shows or hides a split, optionally selecting its arrangement when showing. Hiding never
     /// changes the stored axis, so generic hide/show and a later same-axis command preserve the layout.
-    public func setSplitVisibility(_ sessionID: UUID, shown: Bool, axis: SplitAxis? = nil) {
+    /// `focusesNewSplit` false keeps a new split's primary focused, for a split another Mac asked for.
+    public func setSplitVisibility(_ sessionID: UUID, shown: Bool, axis: SplitAxis? = nil, focusesNewSplit: Bool = true) {
         guard let session = session(withID: sessionID) else { return }
         if shown, let axis { session.splitAxis = axis }
-        setSplitVisibility(session, shown: shown)
+        setSplitVisibility(session, shown: shown, focusesNewSplit: focusesNewSplit)
     }
 
-    private func setSplitVisibility(_ session: Session, shown: Bool) {
+    private func setSplitVisibility(_ session: Session, shown: Bool, focusesNewSplit: Bool = true) {
         let wasShown = session.isSplit
         // hiding a shown split unmounts its right host, so the pacer must stop expecting that key
         if !shown, session.isSplit, let split = session.splitPaneIdentity { launchPaneDrop?([split]) }
@@ -80,7 +92,7 @@ extension AppStore {
             if isNewSplit {
                 // Every split-creating path must mint this identity before exposing the pane.
                 session.splitPaneIdentity = UUID()
-                session.splitFocused = true
+                session.splitFocused = focusesNewSplit
             }
         }
         // hiding the split un-renders a pane, so an overlay opened on it that has not realized yet would sit
@@ -159,6 +171,7 @@ extension AppStore {
         (session.paneBackgrounds.left, session.paneBackgrounds.right) =
             (session.paneBackgrounds.right, session.paneBackgrounds.left)
 
+        (session.paneActivity[.left], session.paneActivity[.right]) = (session.paneActivity[.right], session.paneActivity[.left])
         var indicator = session.agentIndicator
         if indicator.status == .idle {
             indicator.statusPane = nil
@@ -177,16 +190,6 @@ extension AppStore {
         return nil
     }
 
-    /// Clear the agent-status indicator when the pane that OWNED it is torn down, so a pane-tagged block
-    /// can't strand a glyph no surviving surface can keystroke-clear (`AgentIndicator.clearedBy` requires the
-    /// typing pane to match `statusPane`). `owner` is the departing pane; a nil tag counts as `.left`,
-    /// matching the clear-decision default. Mirrors `clearSearch()` on these same teardown paths.
-    private func clearIndicatorOwnedByPane(_ owner: StatusPane, of session: Session) {
-        guard session.agentIndicator.status != .idle,
-              (session.agentIndicator.statusPane ?? .left) == owner else { return }
-        setAgentIndicator(AgentIndicator(), forSession: session.id)
-    }
-
     /// dropScratchDaemon forgets the server scratch of `sessionID`, whose daemon ended or is being replaced, with the
     /// state its pane owned, as `closeScratch` does for a surface.
     public func dropScratchDaemon(_ sessionID: UUID) {
@@ -199,7 +202,7 @@ extension AppStore {
     /// releaseScratchOwnedState drops what a departing scratch owned: a `.scratch`-tagged block (a main/split tag
     /// survives), its background label, since a respawn runs another program, its mailbox, and its directory.
     func releaseScratchOwnedState(of session: Session, token: String) {
-        clearIndicatorOwnedByPane(.scratch, of: session)
+        clearPaneStatus(.scratch, of: session)
         dropPaneBackground(.scratch, of: session)
         disposeMailbox(token: token)
         session.scratchCwd = nil
@@ -216,7 +219,7 @@ extension AppStore {
         closePaneOverlay(sessionID, pane: slot)
         // one handed to another Mac lives in the remote slot only, and the pane's kill does not end its job
         closeRemoteOverlay(sessionID, pane: slot)
-        clearIndicatorOwnedByPane(pane, of: session)
+        clearPaneStatus(pane, of: session)
     }
 
     // drops a departing pane's override and its text file; call it before the identity naming the file goes.
@@ -244,6 +247,7 @@ extension AppStore {
         if let split = session.splitPaneIdentity {
             launchPaneDrop?([split])
             ZmxLeadBook.shared.forget(pane: split)
+            RemoteEndBook.shared.clear(pane: split)
             MessageBus.shared.dispose(pane: split)
             session.daemonBackedPanes.remove(split)
         }
@@ -276,7 +280,7 @@ extension AppStore {
         // zeroes but `searchActive` stays true), so reset search on the surviving session.
         session.clearSearch()
         // the departing right pane owned any `.right`-tagged block, which no survivor can keystroke-clear.
-        clearIndicatorOwnedByPane(.right, of: session)
+        clearPaneStatus(.right, of: session)
         if wasShown { emitPaneVisibility(.paneSplit, session: session, shown: false) }
         savePaneLayout(session)
     }
@@ -299,7 +303,7 @@ extension AppStore {
                 respawnPrimaryPane(session, now: now)
                 return .respawned
             }
-            closeSession(sessionID, alreadyFinalized: alreadyFinalized)
+            closeLastPaneRow(sessionID, alreadyFinalized: alreadyFinalized)
             return .closed
         }
         promoteSplit(session)
@@ -321,6 +325,7 @@ extension AppStore {
         session.splitSurface = nil
         session.daemonBackedPanes.remove(session.paneIdentity)
         ZmxLeadBook.shared.forget(pane: session.paneIdentity)
+        RemoteEndBook.shared.clear(pane: session.paneIdentity)
         MessageBus.shared.dispose(pane: session.paneIdentity)
         // the survivor's override moves left with it; its text file is keyed by the identity promoted below
         dropPaneBackground(.left, of: session)
@@ -360,6 +365,7 @@ extension AppStore {
         // the left slot WITH its exit code, so `session.overlay.result --pane left` still answers afterwards.
         // a torn-down left overlay and a right one changing role both move the tree's pane slots
         if holdsPaneOverlay(session) { scheduleTreeChanged() }
+        if let page = session.paneOverlay(.left)?.html { dropPageCandidate(page.id.uuidString, in: session) }
         session.teardownPaneOverlay(.left)
         session.promotePaneOverlay()
         dropRemoteOverlay(.left, of: session)
@@ -372,9 +378,10 @@ extension AppStore {
         // the exited primary owned any `.left`/nil tag, which dies with it; a `.right` tag belonged to the
         // survivor and FOLLOWS it, re-tagged `.left` so `tree` (now `split:false`) and the survivor's
         // `.left`-role keystroke-clear agree instead of contradicting. `.scratch` is untouched.
+        session.paneActivity[.left] = session.paneActivity.removeValue(forKey: .right)
         if session.agentIndicator.status != .idle, session.remotePresentation?.statusOwnerUnknown != true {
             switch session.agentIndicator.statusPane ?? .left {
-            case .left: setAgentIndicator(AgentIndicator(), forSession: session.id)
+            case .left: showRemainingActivity(of: session)
             case .right:
                 var promoted = session.agentIndicator
                 promoted.statusPane = .left
@@ -436,10 +443,20 @@ extension AppStore {
                 respawnPrimaryPane(session, now: now)
                 return
             }
-            closeSession(sessionID, alreadyFinalized: alreadyFinalized)
+            closeLastPaneRow(sessionID, alreadyFinalized: alreadyFinalized)
             return
         }
         closeSplit(sessionID, alreadyFinalized: alreadyFinalized)
+    }
+
+    /// closeLastPaneRow closes a row whose last pane went. A row its origin ended closes alone, as at relaunch, its
+    /// companions moving up: each has its own origin session and ends on its own.
+    private func closeLastPaneRow(_ sessionID: UUID, alreadyFinalized: UUID?) {
+        guard session(withID: sessionID)?.remotePresentation?.originEnded == true else {
+            closeSession(sessionID, alreadyFinalized: alreadyFinalized)
+            return
+        }
+        _ = closeExactly([sessionID])
     }
 
     /// Opens an ephemeral overlay terminal on a session running `command` (e.g. a TUI). The surface is
@@ -537,6 +554,7 @@ extension AppStore {
             closeSession(sessionID)
             return true
         }
+        if let page = session.htmlOverlay { dropPageCandidate(page.id.uuidString, in: session) }
         let replica = session.overlayReplica
         session.overlayReplica = nil
         session.overlayActive = false
@@ -654,6 +672,7 @@ extension AppStore {
     /// on explicit close and when the program exits. No-op (false) with no overlay on that pane.
     @discardableResult public func closePaneOverlay(_ sessionID: UUID, pane: OverlayPane) -> Bool {
         guard let session = session(withID: sessionID), let overlay = session.paneOverlay(pane) else { return false }
+        if let page = overlay.html { dropPageCandidate(page.id.uuidString, in: session) }
         HtmlOverlayReleases.shared.release(overlay.html)
         session.setPaneOverlay(nil, pane: pane)
         session.paneOverlaySurface(pane)?.teardown()

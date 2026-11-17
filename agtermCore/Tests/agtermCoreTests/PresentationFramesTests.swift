@@ -33,6 +33,9 @@ struct PresentationFramesTests {
         PresentationFrame(gen: 1, rev: 14, body: .presenterAcquire),
         PresentationFrame(gen: 1, rev: 15, body: .presenterGranted),
         PresentationFrame(gen: 1, rev: 16, body: .presenterRefused),
+        PresentationFrame(gen: 1, rev: 16, body: .presenterVacant),
+        PresentationFrame(gen: 1, rev: 16, body: .ended),
+        PresentationFrame(gen: 1, rev: 16, body: .leadReport(PresentationLeadReport(leaders: [UUID()]))),
         PresentationFrame(gen: 1, rev: 17, body: .askRequest(PresentationAsk(
             PendingAsk(id: "a1", title: "deploy?", message: "to prod", buttons: [ControlAskButton(id: "y", label: "Yes", hotkey: "y")],
                        defaultID: "y", style: .gui, align: .center, width: 40),
@@ -147,7 +150,18 @@ struct PresentationFramesTests {
         PresentationFrame(gen: 1, rev: 63, body: .pageResult(PresentationPageResult(
             page: "p10", seq: 4, ok: true, text: "2 of 4: src/b.go",
             state: PresentationTextState(revision: 4, files: TextFiles(count: 4, current: 2, path: "src/b.go"))))),
+        PresentationFrame(gen: 1, rev: 64, body: .pageCommand(PresentationPageCommand(page: "p10", seq: 5, action: .expand, toggle: .on))),
+        PresentationFrame(gen: 1, rev: 65, body: .pageResult(PresentationPageResult(
+            page: "p10", seq: 5, ok: true, text: "expanded", state: PresentationTextState(revision: 4, expand: true)))),
     ]
+
+    @Test func aTextStateFromAPresenterWithoutExpandDecodesWithNone() throws {
+        let line = #"{"kind":"page.result","gen":1,"rev":1,"page":{"page":"p1","seq":1,"ok":true,"state":{"revision":0,"wrap":true}}}"#
+        guard case .pageResult(let result) = try PresentationCodec.decode(Data(line.utf8)).body else { throw DecodedOtherKind() }
+
+        #expect(result.state?.expand == nil)
+        #expect(result.state?.wrap == true)
+    }
 
     @Test(arguments: [
         #"{"kind":"overlay.request","gen":1,"rev":1,"overlay":{"job":"j1","sizePercent":60,"follow":false,"wait":false}}"#,
@@ -263,6 +277,35 @@ struct PresentationFramesTests {
             < PresentationCodec.maxFrameBytes)
     }
 
+    @Test(arguments: [7, nil] as [Int?])
+    func everyHandOverAndReplyCarriesItsOfferAndOneWithoutItSendsNoKey(offer: Int?) throws {
+        let ask = PendingAsk(id: "a", title: "t", buttons: [ControlAskButton(id: "y", label: "Y")])
+        var page = PresentationPage(page: "p1", token: "t", source: .url("http://h/"), identity: "i", chromeless: false,
+                                    javascript: false, navigation: false, browse: false, persistent: false,
+                                    backgroundColor: nil, pane: nil, sizePercent: nil, follow: false)
+        page.offer = offer
+        let bodies: [PresentationFrame.Body] = [
+            .askRequest(PresentationAsk(ask, pane: nil, owner: 1, offer: offer)),
+            .askResolve(PresentationAskAnswer(id: "a", owner: 1, button: "y", offer: offer)),
+            .askRejected(PresentationAskRef(id: "a", owner: 1, offer: offer)),
+            .pickRequest(PresentationPick(PendingPick(id: "p", items: [ControlPickItem(id: "a", label: "A")]), owner: 1, offer: offer)),
+            .pickResolve(PresentationPickAnswer(id: "p", owner: 1, item: "a", offer: offer)),
+            .pickRejected(PresentationPickRef(id: "p", owner: 1, offer: offer)),
+            .pageRequest(page),
+            .pageClosed(PresentationPageChange(page: "p1", offer: offer)),
+            .pageRejected(PresentationPageChange(page: "p1", reason: "slot taken", offer: offer)),
+            .pageState(PresentationPageState(page: "p1", title: nil, address: nil, load: .loaded, error: nil, canGoBack: false,
+                                             canGoForward: false, hidden: false, appliedSeq: 0, offer: offer)),
+            .pageResult(PresentationPageResult(page: "p1", seq: 1, ok: true, offer: offer)),
+        ]
+
+        for body in bodies {
+            let line = try PresentationCodec.encode(PresentationFrame(gen: 1, rev: 1, body: body))
+            #expect(try PresentationCodec.decode(line.dropLast()).body == body)
+            #expect(String(decoding: line, as: UTF8.self).contains(#""offer""#) == (offer != nil))
+        }
+    }
+
     @Test func textFieldsFromAnOlderPeerDecodeAsAbsent() throws {
         let request = #"{"kind":"page.request","gen":1,"rev":1,"page":{"page":"p1","token":"t1","source":{"text":{"path":"/tmp/a.log"}},"#
             + #""identity":"a.log","chromeless":false,"javascript":false,"navigation":false,"browse":false,"#
@@ -301,10 +344,10 @@ struct PresentationFramesTests {
     }
 
     @Test func onlyTheTextActionsAnswerWithAResult() {
-        let answering = Set([PresentationPageAction.follow, .search, .wrap, .changes])
+        let answering = Set([PresentationPageAction.follow, .search, .wrap, .expand, .changes])
 
         for action in [PresentationPageAction.hide, .show, .reloadOriginal, .reloadCurrent, .back, .forward, .browser, .resize,
-                       .follow, .search, .wrap, .changes] {
+                       .follow, .search, .wrap, .expand, .changes] {
             #expect(action.answersWithResult == answering.contains(action))
         }
     }

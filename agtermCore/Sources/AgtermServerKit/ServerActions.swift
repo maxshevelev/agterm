@@ -19,14 +19,17 @@ public final class ServerActions: ControlActions {
     var foregroundArgv: (Int32) -> [String]? = ProcForeground.argv
     /// replayObservation reads, for a replay, the process holding the terminal of the shell with the given pid.
     var replayObservation: (_ leader: Int32, _ shell: String?) -> RestartReplay.Observation = ProcReplay.observation
-    /// processes is the host's process table, through which a kill hangs up the pane's foreground job.
-    var processes: any ProcessTable = ProcProcessTable()
+    /// processes is the panes' process table, so a close and a control kill hang up through the same one.
+    var processes: any ProcessTable {
+        get { panes.processes }
+        set { panes.processes = newValue }
+    }
     /// paneExited runs the exit transition of a pane whose daemon a confirmed kill ended.
     var paneExited: ((Session, UUID) -> Void)?
     /// restartWaits bounds a restart's waits for the old program to end and the new shell to appear.
     var restartWaits = (program: Duration.seconds(1), shell: Duration.seconds(10), poll: Duration.milliseconds(100))
-    /// operationsUnsaved is set while the operation table holds an entry its last write failed to save.
-    var operationsUnsaved = false
+    /// operationBook runs each operation id at most once against the server's catalog.
+    let operationBook = CatalogOperationBook()
     /// recentClosed is the history the store writes its closes into; nil serves no `recent.*`.
     var recentClosed: RecentClosedStore?
     /// pendingCloses is rewritten after each served command, so a crash inside a close's grace is finished at start.
@@ -60,7 +63,7 @@ public final class ServerActions: ControlActions {
             recentItems = nil
             streams.catalogHub.refresh()
         }
-        if let opID = request.args?.opID { return await serveOperation(request, opID: opID) }
+        if let opID = request.args?.opID { return await operationBook.serve(request, opID: opID, host: self) }
         if let refusal = pageRowRefusal(request) { return refusal }
         let response = await ControlDispatcher(actions: self).dispatch(request)
             ?? ControlResponse(ok: false, error: "\(request.cmd.rawValue) is not available on agterm-server")

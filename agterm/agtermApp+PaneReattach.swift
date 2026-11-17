@@ -3,7 +3,7 @@ import AppKit
 
 extension agtermApp {
     /// An attach that stopped, on its exit prompt (a failed take-over included) or waiting to reconnect:
-    /// no client is left to report a role, and a cover would hide the line saying what happened.
+    /// no client is left to report a role, and a cover would hide the notice saying what happened.
     @MainActor
     static func remotePaneStopped(_ view: GhosttySurfaceView, store: AppStore, sessionID: UUID, library: WindowLibrary,
                                   attach: RemoteAttachLines?) {
@@ -50,7 +50,7 @@ extension agtermApp {
         if session.searchSurface === old { session.clearSearch() }
         session.scratchSurface = view
         session.scratchGeneration += 1
-        old.destroySurface()
+        old.retireSurface()
         if hadFocus { view.focusAfterReparent() }
         return true
     }

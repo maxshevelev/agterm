@@ -39,12 +39,12 @@ public final class Session: Identifiable {
     public var unseenCount: Int = 0
 
     /// Per-session agent status, driven over the control channel (`session.status`); the sidebar row's
-    /// status glyph reacts. Ephemeral.
+    /// status glyph reacts. Ephemeral, as is `paneActivity`: each working pane's last `active`, shown when another ends.
     public var agentIndicator = AgentIndicator()
+    @ObservationIgnored var paneActivity: [StatusPane: AgentIndicator] = [:]
 
     /// Last time the status was set, idle and repeated values included; nil before any set, never persisted.
-    /// Must stay a wall-clock `Date`: `controlTree` ships it as epoch seconds compared against `ControlEvent.ts`,
-    /// so a monotonic instant would make a client's computed age meaningless.
+    /// Wall-clock: `controlTree` ships it as epoch seconds against `ControlEvent.ts`, where a monotonic instant means nothing.
     @ObservationIgnored public var statusChangedAt: Date?
     /// When the session last became or stopped being its window's selection, on the same clock; persisted.
     @ObservationIgnored public var lastSelectedAt: Date?
@@ -101,8 +101,8 @@ public final class Session: Identifiable {
     /// state; in a remote window the catalog's. `shown` is read only for a server's scratch.
     public var scratchDaemon: ScratchDaemon?
 
-    /// catalogMail is a remote window row's unacked mail per pane identity, as its server's catalog last reported it.
-    @ObservationIgnored var catalogMail: [UUID: Int] = [:]
+    /// catalogPanes are a remote window row's panes and scratch as its server's catalog last listed them.
+    @ObservationIgnored var catalogPanes: [UUID: CatalogPane] = [:]
 
     /// scratchStoppedGeneration is the `scratchGeneration` whose server scratch attach ended, waiting to reconnect.
     @ObservationIgnored var scratchStoppedGeneration: Int?
@@ -374,7 +374,7 @@ public final class Session: Identifiable {
     public internal(set) var askDraft: AskDraft?
     /// Stable identity of the covered pane; nil covers the whole session.
     public private(set) var askPaneIdentity: UUID?
-    /// The presenter generation the pending ask was handed to, nil while this Mac draws it. A remotely
+    /// askRemoteOwner is the token of the viewer the pending ask was handed to, nil while this Mac draws it. A remotely
     /// presented ask keeps the slot and its result here but is neither drawn nor answered on this Mac.
     public internal(set) var askRemoteOwner: Int?
     /// Tells the presenter a handed-over ask ended here. Set with the handover, run once when it resolves.

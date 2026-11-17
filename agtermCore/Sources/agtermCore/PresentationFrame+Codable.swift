@@ -3,7 +3,7 @@ import Foundation
 extension PresentationFrame: Codable {
     private enum CodingKeys: String, CodingKey {
         case kind, gen, rev, hello, snapshot, status, context, info, layout, hud, notify, message, mail, sound, ask, pick, overlay, page, respawn, link,
-             pending
+             pending, lead
     }
 
     public init(from decoder: Decoder) throws {
@@ -28,6 +28,9 @@ extension PresentationFrame: Codable {
         case "presenter.acquire": body = .presenterAcquire
         case "presenter.granted": body = .presenterGranted
         case "presenter.refused": body = .presenterRefused
+        case "presenter.vacant": body = .presenterVacant
+        case "ended": body = .ended
+        case "lead.report": body = .leadReport(try container.decode(PresentationLeadReport.self, forKey: .lead))
         case "ask.request": body = .askRequest(try container.decode(PresentationAsk.self, forKey: .ask))
         case "ask.resolve": body = .askResolve(try container.decode(PresentationAskAnswer.self, forKey: .ask))
         case "ask.rejected": body = .askRejected(try container.decode(PresentationAskRef.self, forKey: .ask))
@@ -99,7 +102,8 @@ extension PresentationFrame: Codable {
         case .statusClear(let clear): try container.encode(clear, forKey: .status)
         case .statusSeen(let seen): try container.encode(seen, forKey: .status)
         case .pendingChunk(let chunk): try container.encode(chunk, forKey: .pending)
-        case .ping, .ack, .presenterAcquire, .presenterGranted, .presenterRefused, .unknown, .pendingCommit: break
+        case .leadReport(let report): try container.encode(report, forKey: .lead)
+        case .ping, .ack, .presenterAcquire, .presenterGranted, .presenterRefused, .presenterVacant, .ended, .unknown, .pendingCommit: break
         }
     }
 }

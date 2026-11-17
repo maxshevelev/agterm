@@ -221,6 +221,29 @@ final class ControlServerRemotePageTests: XCTestCase {
         XCTAssertEqual(closedNotices(fix), 1)
     }
 
+    func testEveryReportOnAReplicaEchoesTheOfferItWasShownUnder() async throws {
+        let fix = try fixture(files: ["/src/a.diff": ("text/plain", Data("@@ -1 +1 @@\n-a\n+b\n".utf8))])
+        var shown = page(.text(path: "/src/a.diff", line: nil))
+        shown.offer = 7
+        var refused = page(.url("http://127.0.0.1:9/b"))
+        refused.page = UUID().uuidString
+        refused.offer = 8
+        _ = try present(fix, shown)
+        try await waitFor("the diff reports its changes") { fix.session.htmlOverlay?.textChanges?.count == 1 }
+
+        try fix.transport.feed(.pageRequest(refused))
+        try fix.transport.feed(.pageCommand(PresentationPageCommand(page: shown.page, seq: 1, action: .wrap, toggle: .on)))
+        try await waitFor("the action is answered") { !self.results(fix).isEmpty }
+        fix.store.closeOverlay(fix.session.id)
+
+        let rejected = fix.transport.sent.compactMap { if case .pageRejected(let change) = $0 { change } else { nil } }
+        XCTAssertEqual(rejected.map(\.offer), [8])
+        XCTAssertEqual(results(fix).map(\.offer), [7])
+        XCTAssertFalse(states(fix).isEmpty)
+        XCTAssertTrue(states(fix).allSatisfy { $0.offer == 7 })
+        XCTAssertEqual(fix.transport.sent.last, .pageClosed(PresentationPageChange(page: shown.page, offer: 7)))
+    }
+
     private func waitUntil(_ what: String, _ condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(10)
         while !condition(), Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
@@ -399,6 +422,20 @@ final class ControlServerRemotePageTests: XCTestCase {
         XCTAssertEqual(answered[1].state?.changes, TextChanges(count: 1, current: 1))
         XCTAssertEqual(answered[2], PresentationPageResult(page: origin, seq: 3, ok: false, error: "no log page",
                                                            state: answered[1].state))
+    }
+
+    func testAnOriginExpandRunsOnAJSONLinesReplicaAndAnswersWithThePageState() async throws {
+        let fix = try fixture(files: ["/src/a.jsonl": ("text/plain", Data("{\"a\":1}\n".utf8))])
+        _ = try present(fix, page(.text(path: "/src/a.jsonl", line: nil)))
+        let origin = Self.origin.uuidString
+
+        try fix.transport.feed(.pageCommand(PresentationPageCommand(page: origin, seq: 1, action: .expand, toggle: .on)))
+
+        try await waitFor("the action is answered") { !self.results(fix).isEmpty }
+        let answered = results(fix)
+        XCTAssertEqual(answered.first?.text, "expanded")
+        XCTAssertEqual(answered.first?.state?.expand, true)
+        XCTAssertEqual(fix.session.htmlOverlay?.textExpand, true)
     }
 
     func testAQueuedTextActionNeverReachesAPageThatReplacedItsOwn() async throws {

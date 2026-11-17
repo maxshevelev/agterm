@@ -1246,7 +1246,25 @@ struct SocketClientTests {
         let out = SocketClient.formatResponse(ControlResponse(ok: true, result: ControlResult(tree: tree)))
 
         #expect(out.contains("presentation: failed (exit 255)"))
-        #expect(out.contains("mirrored by: 2"))
+        #expect(out.contains("viewed by: 2"))
+    }
+
+    @Test(arguments: [(ControlPresentersNode(mirrors: 1, presenter: true, viewers: 3), 3), (ControlPresentersNode(mirrors: 1, presenter: true), 2),
+                      (ControlPresentersNode(mirrors: 2), 2)])
+    func theViewerCountComesFromViewersOrFromAnOlderAppsMirrorsAndPresenter(node: ControlPresentersNode, count: Int) {
+        #expect(node.viewedBy == count)
+    }
+
+    @Test func presentersDecodeAcrossVersions() throws {
+        struct OlderPresenters: Decodable, Equatable {
+            let mirrors: Int
+            let presenter: Bool?
+        }
+        let current = try JSONEncoder().encode(ControlPresentersNode(mirrors: 1, presenter: true, viewers: 2))
+        let older = Data(#"{"mirrors":1,"presenter":true}"#.utf8)
+
+        #expect(try JSONDecoder().decode(OlderPresenters.self, from: current) == OlderPresenters(mirrors: 1, presenter: true))
+        #expect(try JSONDecoder().decode(ControlPresentersNode.self, from: older).viewedBy == 2)
     }
 
     @Test func formatTreeShowsThePresenterOnBothSides() {
@@ -1262,8 +1280,7 @@ struct SocketClientTests {
         let out = SocketClient.formatResponse(ControlResponse(ok: true, result: ControlResult(tree: tree)))
 
         #expect(out.contains("presentation: connected, presenter"))
-        #expect(out.contains("presented remotely"))
-        #expect(!out.contains("mirrored by"))
+        #expect(out.contains("viewed by: 1"))
     }
 
     @Test func formatResponseTree() {
@@ -1438,6 +1455,16 @@ struct SocketClientTests {
         #expect(format(installed: AppIdentity(version: "0.34.0", commit: "def5678"))
             == "0.34.0 (a1b2c3d)\ninstalled: 0.34.0 (def5678)")
         #expect(format(installed: AppIdentity(version: "0.35.1")) == "0.34.0 (a1b2c3d)\ninstalled: 0.35.1")
+    }
+
+    @Test func formatsTheUpdateScheduleOnVersion() {
+        let app = AppIdentity(version: "0.43.0")
+        func format(_ updates: ControlUpdateStatus) -> String {
+            SocketClient.formatResponse(ControlResponse(ok: true, result: ControlResult(app: app, updates: updates)))
+        }
+
+        #expect(format(ControlUpdateStatus(automaticChecks: true, lastCheck: 0)) == "0.43.0\nupdates: automatic, last checked 1970-01-01T00:00:00Z")
+        #expect(format(ControlUpdateStatus(automaticChecks: false, lastCheck: nil)) == "0.43.0\nupdates: manual, never checked")
     }
 
     @Test func formatsTheVersionsAHeadlessServerAdvertises() {

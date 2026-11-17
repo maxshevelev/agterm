@@ -267,6 +267,10 @@ public struct HtmlOverlay: Equatable, Sendable {
     public internal(set) var textFiles: TextFiles?
     /// textWrap is whether a text page wraps long lines.
     public internal(set) var textWrap = false
+    /// textExpand is whether a JSON Lines page lays each record out over indented rows.
+    public internal(set) var textExpand = false
+    /// imagePixels is an image page's probed size, which it needs to be handed to another Mac.
+    public let imagePixels: ImagePixels?
     public var loadState: HtmlLoadState = .loading
     public var loadError: String?
     /// loadFailurePinned keeps a failure the page cannot load past, such as its port forward ending, over every
@@ -294,8 +298,10 @@ public struct HtmlOverlay: Equatable, Sendable {
     /// Forward its links cannot use.
     public init(source: HtmlSource, navigation: Bool = false, javascript: Bool = false, chromeless: Bool = false,
                 persistent: Bool = false, browse: Bool = false, clicked: Bool = false, id: UUID = UUID(),
-                replicaOf: UUID? = nil, textLog: TextLog? = nil, markdownLinks: MarkdownLinkGrant? = nil) {
+                replicaOf: UUID? = nil, textLog: TextLog? = nil, markdownLinks: MarkdownLinkGrant? = nil,
+                imagePixels: ImagePixels? = nil) {
         self.id = id
+        self.imagePixels = imagePixels
         self.textLog = textLog
         logState = textLog.map { TextLogState(following: $0.follow) }
         self.clicked = clicked
@@ -311,9 +317,9 @@ public struct HtmlOverlay: Equatable, Sendable {
     }
 
     /// mirror takes the text state the presenting Mac reported for this origin record of a page it shows; true when
-    /// following, the query or the wrap changed.
+    /// following, the query, the wrap or the expand changed.
     mutating func mirror(_ text: PresentationTextState) -> Bool {
-        let before = (logState?.following, textSearch?.query, textWrap)
+        let before = (logState?.following, textSearch?.query, textWrap, textExpand)
         if let following = text.following { logState?.following = following }
         if let log = text.log { logState?.report = log }
         searchRevision = text.revision
@@ -321,9 +327,10 @@ public struct HtmlOverlay: Equatable, Sendable {
             $0.isEmpty ? nil : TextSearch(query: $0, matches: text.matches ?? 0, current: text.current ?? 0)
         }
         textWrap = text.wrap
+        textExpand = text.expand ?? false
         textChanges = text.changes
         textFiles = text.files
-        return before != (logState?.following, textSearch?.query, textWrap)
+        return before != (logState?.following, textSearch?.query, textWrap, textExpand)
     }
 
     /// grantError says why `file` cannot be opened under `grantRoot`, nil when it can. Both must be absolute, and the file
@@ -550,6 +557,11 @@ public final class HtmlOverlayReleases {
     func release(_ overlay: HtmlOverlay?) {
         guard let overlay else { return }
         HtmlPageOutcomes.shared.dismiss(overlay.id)
+        moved(overlay)
+    }
+
+    /// moved frees what showed `overlay` here once it left its slot for another Mac, its outcome still open.
+    func moved(_ overlay: HtmlOverlay) {
         onRelease?(overlay.id)
         onServedRelease?(overlay.id)
         if let origin = overlay.replicaOf { onReplicaRelease?(overlay.id, origin) }

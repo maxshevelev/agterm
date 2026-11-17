@@ -13,7 +13,7 @@ extension RemoteOperation {
         .sessionNew, .sessionDuplicate, .sessionCompanionNew, .sessionCompanionPage, .sessionPage, .sessionSplit, .sessionSplitClose, .sessionSwap, .sessionRename, .sessionClose, .sessionTerminate,
         .sessionMove, .sessionScratch, .workspaceNew, .workspaceRename, .workspaceDelete, .workspaceMove,
         .sessionFlag, .sessionTint, .workspaceFlag, .workspaceTint,
-        .sessionRestart, .sessionCompanionDuplicate, .sessionCompanionConvert, .zmxKill, .zmxKillPane,
+        .sessionRestart, .sessionCompanionDuplicate, .sessionCompanionConvert, .sessionCompanionMove, .zmxKill, .zmxKillPane,
     ]
 
     /// markCommands set flag and tint, which only a server carrying them in its catalog keeps.
@@ -34,7 +34,7 @@ extension RemoteOperation {
     public static func parse(_ request: ControlRequest, in store: AppStore) -> RemoteOperationParse {
         let args = request.args ?? ControlArgs()
         // the caller's own id and epoch would be replaced by this window's, running what its epoch might refuse
-        if args.opID != nil || args.epoch != nil || args.panes != nil || args.scratch != nil { return refuse("operation receipts are served only by agterm-server") }
+        if args.opID != nil || args.epoch != nil || args.panes != nil || args.scratch != nil { return refuse("a remote window adds operation ids itself; send the command without them") }
         let select = args.noSelect != true
         var shell = RemoteShellOptions(name: args.name, cwd: args.cwd, command: args.command, wait: args.wait == true)
         switch request.cmd {
@@ -134,6 +134,8 @@ extension RemoteOperation {
         case .sessionCompanionConvert:
             // the converted row keeps its id and the selection, as a local convert leaves them
             return session(request.target, in: store) { .operation(.convertCompanion($0), select: false) }
+        case .sessionCompanionMove:
+            return moveCompanion(request, in: store)
         case .zmxKill, .zmxKillPane:
             return kill(request, in: store)
         case .sessionTint, .workspaceTint:
@@ -163,6 +165,31 @@ extension RemoteOperation {
             return workspace(request.target, in: store) { .operation(.moveWorkspace($0, to: to), select: false) }
         default:
             return refuse("\(request.cmd.rawValue) is not sent to a remote window's server")
+        }
+    }
+
+    /// companionIndex maps `slot`, a place among `visible` (the destination's companions this window shows), to the
+    /// server's index among `group` (all of them there, detached rows included); both leave out the moving companion.
+    public static func companionIndex(slot: Int?, visible: [UUID], group: [UUID]) -> Int? {
+        guard let slot else { return nil }
+        if slot < visible.count, let index = group.firstIndex(of: visible[max(slot, 0)]) { return index }
+        if let last = visible.last, let index = group.firstIndex(of: last) { return index + 1 }
+        return 0
+    }
+
+    // the index is already in the server's terms here: a control caller addresses the server's group
+    @MainActor
+    private static func moveCompanion(_ request: ControlRequest, in store: AppStore) -> RemoteOperationParse {
+        let move: ControlDispatcher.CompanionMove
+        switch ControlDispatcher.companionMoveArguments(request.args) {
+        case .failure(let rejection): return refuse(rejection.message)
+        case .success(let parsed): move = parsed
+        }
+        return session(request.target, in: store) { id in
+            session(move.parent, in: store) { parent in
+                if case .failure(let refusal) = store.canMoveCompanion(id, under: parent) { return refuse(refusal.message) }
+                return .operation(.moveCompanion(id, parent: parent, index: move.index), select: false)
+            }
         }
     }
 

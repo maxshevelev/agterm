@@ -23,6 +23,7 @@ struct agtermApp: App {
     @State private var hookController: HookController
     @State private var controlServer: ControlServer
     @State var liveReset: LiveResetCoordinator
+    var updates: UpdateController { .shared }
     @State private var customCommandRunner: CustomCommandRunner
     @State private var appearanceObserver: SystemAppearanceObserver
     @State private var accessibilityObserver: SystemAccessibilityObserver
@@ -285,6 +286,7 @@ struct agtermApp: App {
                         appDelegate.settingsModel = settingsModel
                         appDelegate.liveResetMarkerStore = liveResetMarkerStore
                         appDelegate.liveReset = liveReset
+                        appDelegate.updates = updates
                         // hand the delegate the action hub and drain folders `open -a agterm /path` queued
                         // before the window store resolved.
                         appDelegate.actions = actions
@@ -572,6 +574,12 @@ struct agtermApp: App {
             Self.persistFontSize(size, from: view, store: store, sessionID: sessionID)
         }
         Self.wireSearchCallbacks(view, store: store, sessionID: sessionID, actions: services.actions)
+        // a remote pane draws its own notice over the kept screen, so Ghostty's prompt text stays off it
+        view.consumesHeldExit = session.remoteHost != nil
+        // a fresh attach owes nothing to an earlier one's end; a reopened catalog pane keeps its identity
+        if session.remoteHost != nil, let pane = view.isSplitPane ? session.splitPaneIdentity : session.paneIdentity {
+            RemoteEndBook.shared.clear(pane: pane)
+        }
         view.onExitHeld = { [weak view] in
             guard let view else { return }
             // the wrapper is gone, so no key can end a wait; a replaced surface's late exit is not this pane's
@@ -585,9 +593,10 @@ struct agtermApp: App {
         }
     }
 
-    /// replacePane puts a surface built from `launch` in `old`'s slot and destroys `old`, running none of
+    /// replacePane puts a surface built from `launch` in `old`'s slot and retires `old`, running none of
     /// the pane's close paths. `spawnFirst` creates the new surface at the old size BEFORE the free: libghostty
     /// routes a queued child-exit by surface address, and a surface created after it can take the old exit.
+    /// Retiring keeps the old surface allocated until its threads have exited, without the main thread waiting on them.
     @MainActor
     static func replacePane(_ old: GhosttySurfaceView, launch: PaneReattach, lead: ZmxLeadAttachment, cover: Bool,
                             spawnFirst: Bool = false, services: SurfaceServices) -> GhosttySurfaceView? {
@@ -607,7 +616,7 @@ struct agtermApp: App {
         // the old client's exit must not close the pane the new one now owns
         _ = old.claimProcessExit()
         let hadFocus = old.window?.firstResponder === old
-        // synchronously: END_SEARCH reports back through a callback `destroySurface` clears first
+        // synchronously: the retired surface's END_SEARCH callback is dropped
         if session.searchSurface === old {
             session.searchActive = false
             session.searchNeedle = ""
@@ -620,7 +629,7 @@ struct agtermApp: App {
             view.frame = old.frame.isEmpty ? NSRect(x: 0, y: 0, width: 800, height: 600) : old.frame
             view.createSurface()
         }
-        old.destroySurface()
+        old.retireSurface()
         if old.backedByZmx { services.zmxForegroundResolver?.noteLifecycleChange() }
         if hadFocus { view.focusAfterReparent() }
         return view
@@ -636,7 +645,8 @@ struct agtermApp: App {
         guard let session = store.session(withID: sessionID), session.surface === view || session.splitSurface === view else { return }
         // the catalog owns a remote window's panes: an exit here attaches again, or keeps an ended row's screen
         if session.remotePresentation?.binding.catalogOwned == true {
-            if !session.ended { PaneLead.reattach?(view, false) }
+            let pane = view.isSplitPane ? session.splitPaneIdentity : session.paneIdentity
+            if !session.ended, !(pane.map(session.catalogPaneHeld) ?? false) { PaneLead.reattach?(view, false) }
             return
         }
         if view.isSplitPane {
@@ -737,9 +747,9 @@ struct agtermApp: App {
     }
 
     /// Wires the pane-scoped keystroke-clear: `keyDown` fires `onUserInputClearsStatus` unconditionally, and this
-    /// closure clears to idle only when host-free `AgentIndicator.clearedBy(pane:keystroke:reset:)` says the
-    /// keystroke's OWN pane owns the status under the Status reset setting, read live from `GhosttyApp` so a
-    /// Settings change applies to the next key. A block set from a background pane survives typing elsewhere. Main/split read
+    /// closure hands it to `AppStore.clearStatus(by:)`, which clears only when the keystroke's OWN pane owns the
+    /// status under the Status reset setting, read live from `GhosttyApp` so a Settings change applies to the
+    /// next key. A block set from a background pane survives typing elsewhere. Main/split read
     /// the LIVE `isSplitPane` at keystroke time, so a promoted survivor clears as `.left`, matching its migrated
     /// status identity and `tree` addressing; a captured `.right` would clear the wrong pane and leave both panes
     /// `.right`-wired after a re-split. The scratch passes `fixedPane: .scratch`: never promoted, no `view.session`.
@@ -752,10 +762,7 @@ struct agtermApp: App {
             if store.forwardStatusKeystroke(keystroke, pane: pane, forSession: sessionID) { return }
             // a status mirrored from an origin pane this Mac has no counterpart for is not this pane's to clear
             guard store.session(withID: sessionID)?.remotePresentation?.allowsKeystrokeStatusClear != false else { return }
-            if store.session(withID: sessionID)?.agentIndicator
-                .clearedBy(pane: pane, keystroke: keystroke, reset: reset) == true {
-                store.setAgentIndicator(AgentIndicator(), forSession: sessionID)
-            }
+            store.clearStatus(by: keystroke, pane: pane, reset: reset, forSession: sessionID)
         }
     }
 

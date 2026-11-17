@@ -4,10 +4,10 @@ import agtermCore
 
 struct ServerCommandPolicyTests {
     @Test(arguments: [Command.tree, .version, .windowList, .eventsRead, .sessionMove, .sessionOverlayHide, .sessionOverlayShow, .sessionOverlayToggle,
-                      .sessionOverlayFollow, .sessionOverlaySearch, .sessionOverlayWrap, .sessionOverlayChanges, .sessionOverlayFiles, .sessionPage,
+                      .sessionOverlayFollow, .sessionOverlaySearch, .sessionOverlayWrap, .sessionOverlayExpand, .sessionOverlayChanges, .sessionOverlayFiles, .sessionPage,
                       .sessionCompanionPage, .sessionCompanionPageAttach, .surfaceCursor, .zmxList, .zmxScreen, .sessionFlag, .sessionTint,
                       .workspaceFlag, .workspaceTint, .sessionDuplicate, .sessionRestart,
-                      .sessionCompanionDuplicate, .sessionCompanionConvert, .zmxKill, .zmxPrune, .sessionTerminate, .zmxKillPane])
+                      .sessionCompanionDuplicate, .sessionCompanionConvert, .sessionCompanionMove, .zmxKill, .zmxPrune, .sessionTerminate, .zmxKillPane])
     func aServedCommandPasses(_ command: Command) {
         #expect(ServerCommandPolicy.refusal(command) == nil)
     }
@@ -26,6 +26,7 @@ struct ServerCommandPolicyTests {
         "moves what a Mac shows": [.sessionFocus, .sessionSelect, .sessionGo, .sessionLead, .sessionResize, .workspaceSelect, .workspaceGo],
         "Finder on the Mac": [.sessionReveal],
         "Mac app relaunch": [.restoreMode, .restoreCapture, .restoreClear, .zmxReset, .sessionRestore],
+        "the Mac app's own updater": [.updateCheck],
         "makes a Mac viewer": [.zmxAttach, .zmxAttachGroup],
         "UI-test seam": [.debugAppearance],
         "deferred to docs/backlog/server-user-event-hooks.md": [.hooksList, .hooksReload],
