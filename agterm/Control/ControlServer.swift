@@ -578,9 +578,7 @@ final class ControlServer {
                 let response = runBlocking { await server.originOperation(request) }
                 _ = server.responseWriter(conn, response ?? ControlResponse(ok: false, error: "no operation id"))
             }
-            let worker = Thread(block: work)
-            worker.name = "com.umputun.agterm.control.catalog"
-            worker.start()
+            Self.startWorker("com.umputun.agterm.control.catalog", work)
             return
         }
 
@@ -596,9 +594,7 @@ final class ControlServer {
                 defer { close(conn) }
                 _ = server.responseWriter(conn, runBlocking { await server.runRemoteRoute(route) })
             }
-            let worker = Thread(block: work)
-            worker.name = "com.umputun.agterm.control.remote"
-            worker.start()
+            Self.startWorker("com.umputun.agterm.control.remote", work)
             return
         }
 
@@ -606,15 +602,11 @@ final class ControlServer {
         // waits in this server's backlog while this connection holds the only accept thread.
         if Self.waitsOnNetwork(request.cmd) {
             handedOff = true
-            // explicit @Sendable: an inferred @MainActor closure here would trip the executor assertion
-            // when this thread runs it.
             let work: @Sendable () -> Void = {
                 defer { close(conn) }
                 _ = server.responseWriter(conn, runBlocking { await server.dispatch(request) })
             }
-            let worker = Thread(block: work)
-            worker.name = "com.umputun.agterm.control.remote"
-            worker.start()
+            Self.startWorker("com.umputun.agterm.control.remote", work)
             return
         }
 
