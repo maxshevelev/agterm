@@ -43,7 +43,7 @@ public struct ControlDispatcher {
         case .sessionOverlayJobRun, .sessionOverlayPageServe:
             return dispatchSessionOverlayCommand(request)
         case .sessionCompanionNew, .sessionCompanionPage, .sessionPage, .sessionCompanionDuplicate, .sessionCompanionConvert,
-                .sessionCompanionMove, .sessionCompanionPageAttach, .sessionCollapse, .sessionExpand:
+                .sessionCompanionMove, .sessionCompanionPromote, .sessionCompanionPageAttach, .sessionCollapse, .sessionExpand:
             return await dispatchCompanionCommand(request)
         case .sessionRemoteNew:
             switch RemoteSessionCreate.parse(request) {
@@ -448,7 +448,7 @@ public struct ControlDispatcher {
         case .sessionPaste:
             switch parsePane(request.args?.pane) {
             case .pane(let parsed):
-                return actions.pasteSession(request.target, window: request.args?.window, pane: parsed)
+                return await actions.pasteSession(request.target, window: request.args?.window, pane: parsed)
             case .rejected(let rejection): return rejection
             }
         case .sessionSelectAll:
