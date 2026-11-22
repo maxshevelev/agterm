@@ -273,8 +273,8 @@ process — what it is running — omitted when the pane sits at its shell promp
 setuid/setgid foreground process like `top` or `sudo`, whose argv macOS refuses to expose),
 `foregroundShell`/`splitForegroundShell` (the shell HOLDING each pane's foreground as a basename — `zsh`,
 `fish` — present exactly when that pane's `foreground` is omitted because a shell holds it. For a pane that
-EXISTS, both omitted together means agterm could not read the process, which is how you tell "a shell has it"
-from "cannot tell"; check `hasSplit` before reading the split pair, since a session with no split omits both
+EXISTS, both omitted together means agterm could not read the process, or that the pane's program is still held
+until its terminal attaches, which is how you tell "a shell has it" from "cannot tell"; check `hasSplit` before reading the split pair, since a session with no split omits both
 simply because there is no pane. It is NOT a claim the pane is at a prompt and NEVER permission to type: a
 builtin like `read` runs inside the shell, so a pane blocked on input is indistinguishable from an idle one.
 A shell agterm does not recognize, outside its known set and your `$SHELL`, reports in `foreground` like any
@@ -625,7 +625,7 @@ workspace (rename, delete, select, move, collapse, expand, tint and detach) refu
   companions shown under it (a reorder under the same parent stays here), and another Mac attached
   to the same sessions keeps the old grouping until it reattaches. Wire command `session.companion.move`;
   returns `result.id` and `result.parent`. Read back as the node's `parent` and tree order. GUI twins: a drag in
-  the sidebar tree, a drop on another top-level session's row, and Move to in a companion row's context menu.
+  the sidebar tree, a drop on another top-level session's row, and Move Under in a companion row's context menu.
 - `session move --top-level [WORKSPACE | --after SID | --before SID] [--target T] [--window W]` - make a companion a
   top-level session, keeping its id and running panes: right after the group it leaves when no destination is given,
   appended to a workspace (`root` for the top-level sessions), or beside the anchor's whole group, its former
@@ -1709,6 +1709,11 @@ the Mac showing it; `catalog` is served by agterm-server and by that other Mac.
   mode takes them for the window `--window` names by full id and refuses a request naming none
   (`the request names no window on HOST`). That Mac's `window list` and `tree` report `catalogViewers` on a window
   other Macs show, omitted at none.
+- `--attach-pending` on `session new`, `duplicate`, `scratch` and `restart`: agterm-server holds the program a new
+  terminal pane starts (not a
+  plain shell) until a terminal attaches, at most 30 s, so its startup terminal queries can get answers. A Mac accepts and ignores it. agterm sends it when it
+  creates or restarts a server pane it will attach; a command created on the server without it starts at once (user guide,
+  Open a remote window).
 - On agterm-server: one window (the catalog, `--window` takes its id or `active`); `NAME is not available on
   agterm-server` for every command it does not serve (window mutations, sidebar, font, theme, keymap, quick,
   dashboard, zoom and more; `window list`, `msg send/read/ack` between its own panes and the presenter bridges
@@ -2755,7 +2760,8 @@ be typed.
 
 Closing a remote session here ends only this side's connection: the far-side processes keep running and
 nothing agterm does from this end can kill them. An open attached row is saved and attached again at the next
-launch whatever the restore mode is, without taking the lead from a Mac that took it meanwhile. A row whose
+launch whatever the restore mode is, and a reopened window attaches its rows again too; a pane this Mac led takes
+the lead back under the reconnect rule below. A row whose
 session the origin no longer has closes instead; an attached page waits for the origin to hand it
 over and retries while the host does not answer.
 
@@ -2779,7 +2785,10 @@ for this Mac, as pressing a key or clicking on the cover does.
 A pane or scratch that reconnects after its ssh dropped takes the lead back when this Mac led it at the drop and
 nobody has used it since: this Mac's lost connection still holds the lead, or another Mac took it only
 because the pane was free and nothing was typed, pasted or clicked there since. Otherwise it comes back
-covered. Text a script types with `session type` on the Mac the session runs on does not count as use. A session started by an agterm without this
+covered. A relaunch or a reopened window does the same for each pane this Mac led when it left: in an attached
+session, in a remote window, and in this Mac's own Live sessions while another Mac shows them; opening a
+window of another Mac takes the lead outright instead. Text a script
+types with `session type` on the Mac the session runs on does not count as use. A session started by an agterm without this
 behavior keeps leaving the lead where it is until it ends.
 
 On the Mac the session RUNS on, a covered pane stays fully drivable: `session type`, `session text` and

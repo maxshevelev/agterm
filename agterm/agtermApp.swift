@@ -90,6 +90,7 @@ struct agtermApp: App {
     }
 
     init() {
+        LaunchTrace.shared.mark(.initEntry)
         // before NSApplicationMain restores: windows opt out, so state left by an unclean exit restores none and no launch window opens
         UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
         #if DEBUG
@@ -236,6 +237,7 @@ struct agtermApp: App {
             }
             logger.debug("launch spawn queue armed with \(plan.order.count) panes, \(plan.burst.count) in the burst")
         }
+        LaunchTrace.shared.mark(.initExit)
     }
 
     var body: some Scene {
@@ -276,6 +278,7 @@ struct agtermApp: App {
                 )
                     .frame(minWidth: 640, minHeight: 400)
                     .task {
+                        LaunchTrace.shared.mark(.sceneTask)
                         appDelegate.library = library
                         appDelegate.captureOnExit = captureOnExit
                         // `openWindow` lives only in the scene: hand it to the action hub for cross-window
@@ -290,6 +293,7 @@ struct agtermApp: App {
                         // socket on terminate.
                         appDelegate.controlServer = controlServer
                         controlServer.start()
+                        LaunchTrace.shared.mark(.socket, "bound=\(controlServer.boundSocketPath != nil)")
                         // bind the app-level quick terminal (idempotent); its env needs the bound socket, so
                         // this follows `start()` like the surface environment does.
                         wireQuickTerminal(library: library)
@@ -536,8 +540,9 @@ struct agtermApp: App {
         // foreground pid, so it is never captured and restores via the exec `command` path, keeping close-on-exit.
         // `LaunchSeedProvider` owns the precedence between them and resolves it at spawn time, not here, so
         // the pending slots stay on the session until the pane really spawns.
-        // without the claim: a pane relaunched while another Mac leads its daemon comes back covered
-        let lead = ZmxLeadAttachment(claim: false)
+        // without the claim, so a lead another Mac took and used stays theirs; a restored pane names the attach it
+        // led with, which zmx patch 0008 lets it take back from a leader that only filled the vacancy
+        let lead = ZmxLeadAttachment(claim: false, reclaim: ZmxLeadBook.shared.pendingReclaim(pane: session.paneIdentity))
         let zmx = ZmxLaunch.wrapsLocally(mode: ghostty.launchRestoreMode, session: session)
             ? ZmxLaunch.configuration(paneIdentity: session.paneIdentity, pane: "primary", environment: env, lead: lead)
             : nil
@@ -804,7 +809,7 @@ struct agtermApp: App {
         // the parent's window/workspace/session ids.
         // Creation, capture and override precedence matches the primary.
         let ghostty = GhosttyApp.shared
-        let lead = ZmxLeadAttachment(claim: false)
+        let lead = ZmxLeadAttachment(claim: false, reclaim: session.splitPaneIdentity.flatMap { ZmxLeadBook.shared.pendingReclaim(pane: $0) })
         let zmx = ZmxLaunch.wrapsLocally(mode: ghostty.launchRestoreMode, session: session)
             ? ZmxLaunch.configuration(paneIdentity: session.splitPaneIdentity, pane: "split", environment: env, lead: lead)
             : nil

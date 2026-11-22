@@ -70,8 +70,116 @@ def listed(name):
     return name.encode() in cli("list", "--short").stdout.split()
 
 
+def legacy_ipc(executable):
+    """legacy_ipc is true for a zmx before 1.0, against whose daemon the new client refuses run, tail and write."""
+    found = re.search(rb"zmx\s+(\d+)\.", cli("version", executable=executable).stdout)
+    return found is not None and int(found.group(1)) < 1
+
+
+def written(path, content):
+    """written waits up to 5 s for path to hold content: `zmx write` has the session's shell write it."""
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            with open(path, "rb") as f:
+                if f.read() == content:
+                    return True
+        except OSError:
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def tail_prints(name, typed, marker):
+    """tail_prints reports whether `zmx tail` on name prints marker after typed reaches the session, within 5 s."""
+    env = dict(os.environ, ZMX_DIR=ZDIR)
+    env.pop("ZMX_SESSION", None)
+    proc = subprocess.Popen([ZMX, "tail", name], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        cli("type", name, stdin=typed)
+        seen, deadline = b"", time.time() + 5
+        while marker not in seen and time.time() < deadline:
+            ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if ready:
+                chunk = os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                seen += chunk
+        return marker in seen
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def check(label, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + label + (" :: " + detail if detail and not ok else ""))
+    return ok
+
+
+QUERY_PROBE = r"""
+import os, re, select, sys, time, tty
+size = os.get_terminal_size(0)
+open(sys.argv[1], "w").close()
+tty.setraw(0)
+os.write(1, b"SIZE=%d,%d\r\n" % (size.lines, size.columns))
+os.write(1, b"\x1b[6n\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
+want = [rb"\x1b\[\d+;\d+R", rb"\x1b\]10;rgb:[0-9a-f/]+\x1b\\", rb"\x1b\]11;rgb:[0-9a-f/]+\x1b\\"]
+got, end = b"", time.time() + 3
+while time.time() < end and not all(re.search(w, got) for w in want):
+    if select.select([0], [], [], 0.1)[0]:
+        got += os.read(0, 256)
+os.write(1, b"REPLIES-OK\r\n" if all(re.search(w, got) for w in want) else b"REPLIES-MISSING\r\n")
+time.sleep(0.5)
+"""
+QUERIES = (b"\x1b[6n", b"\x1b]10;?\x1b\\", b"\x1b]11;?\x1b\\")
+
+
+def check_hold():
+    ok = True
+    marker = os.path.join(ZDIR, "held-ran")
+    created = cli("attach", "--detached", "held", "/usr/bin/python3", "-c", QUERY_PROBE, marker,
+                  extra={"ZMX_HOLD_UNTIL_ATTACH": "10"})
+    time.sleep(1.0)
+    ok &= check("a held create starts the daemon but not its command",
+                created.returncode == 0 and listed("held") and not os.path.exists(marker), repr(created.stderr))
+    pid, fd = attach("held-1", 30, 83, claim=False, name="held")
+    try:
+        out, end = b"", time.time() + 5
+        while time.time() < end and not all(q in out for q in QUERIES):
+            out += drain(fd, 0.1)
+        queried = all(q in out for q in QUERIES)
+        if queried:
+            os.write(fd, b"\x1b[1;1R\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:3030/3030/3030\x1b\\")
+        out += drain(fd, 2.0)
+        ok &= check("the first attach releases it at its own size and answers the queries it writes at exec",
+                    os.path.exists(marker) and queried and b"SIZE=30,83" in out and b"REPLIES-OK" in out,
+                    repr(out[-300:]))
+    finally:
+        os.close(fd)
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+
+    timed = os.path.join(ZDIR, "timed-ran")
+    cli("attach", "--detached", "timed", "/bin/sh", "-c", "touch %s; sleep 30" % timed,
+        extra={"ZMX_HOLD_UNTIL_ATTACH": "1"})
+    time.sleep(2.0)
+    ok &= check("a hold nobody attaches to releases at its bound", os.path.exists(timed))
+
+    killed = os.path.join(ZDIR, "held-killed-ran")
+    created = cli("attach", "--detached", "held-killed", "/bin/sh", "-c", "touch %s" % killed,
+                  extra={"ZMX_HOLD_UNTIL_ATTACH": "1"})
+    was_listed = listed("held-killed")
+    stopped = cli("kill", "held-killed", "--force")
+    time.sleep(1.5)
+    ok &= check("a kill while held ends the session before its command runs",
+                created.returncode == 0 and was_listed and stopped.returncode == 0
+                and not listed("held-killed") and not os.path.exists(killed),
+                repr((created.stderr, stopped.stderr)))
+
+    bad = cli("attach", "--detached", "held-bad", "/bin/sh", extra={"ZMX_HOLD_UNTIL_ATTACH": "0"})
+    ok &= check("a hold of zero seconds is refused", bad.returncode != 0 and not listed("held-bad"), repr(bad.stderr))
     return ok
 
 
@@ -105,13 +213,25 @@ def check_upgrade(previous):
         printed = cli("print", name, stdin=b"OLD-DAEMON-PRINT")
         ok &= check("the new client prints to the previous daemon's clients",
                     printed.returncode == 0 and b"OLD-DAEMON-PRINT" in drain(back[1], 1.0), repr(printed.stderr))
-        ran, tailed = cli("run", name, "true"), cli("tail", name)
-        ok &= check("the new client refuses to run or tail through the previous daemon",
-                    ran.returncode != 0 and b"does not support run" in ran.stderr
-                    and tailed.returncode != 0 and b"does not support tail" in tailed.stderr, repr((ran.stderr, tailed.stderr)))
-        wrote = cli("write", name, os.path.join(ZDIR, "upgrade-write"), stdin=b"OLD-DAEMON-WRITE")
-        ok &= check("the new client refuses to write through the previous daemon",
-                    wrote.returncode != 0 and b"does not support write" in wrote.stderr, repr(wrote.stderr))
+        target = os.path.join(ZDIR, "upgrade-write")
+        if legacy_ipc(previous):
+            ran, tailed = cli("run", name, "true"), cli("tail", name)
+            ok &= check("the new client refuses to run or tail through the previous daemon",
+                        ran.returncode != 0 and b"does not support run" in ran.stderr
+                        and tailed.returncode != 0 and b"does not support tail" in tailed.stderr,
+                        repr((ran.stderr, tailed.stderr)))
+            wrote = cli("write", name, target, stdin=b"OLD-DAEMON-WRITE")
+            ok &= check("the new client refuses to write through the previous daemon",
+                        wrote.returncode != 0 and b"does not support write" in wrote.stderr, repr(wrote.stderr))
+        else:
+            ran = cli("run", name, "sh", "-c", "exit 7")
+            ok &= check("the new client runs a task through the previous daemon and gets its code",
+                        ran.returncode == 7, repr((ran.returncode, ran.stderr)))
+            followed = tail_prints(name, b"printf 'OLD-%s-TAIL\\n' DAEMON\r", b"OLD-DAEMON-TAIL")
+            ok &= check("the new client tails the previous daemon's new output", followed)
+            wrote = cli("write", name, target, stdin=b"OLD-DAEMON-WRITE")
+            ok &= check("the new client writes through the previous daemon",
+                        wrote.returncode == 0 and written(target, b"OLD-DAEMON-WRITE"), repr(wrote.stderr))
         killed = cli("kill", name)
         ok &= check("the new client kills the previous daemon",
                     killed.returncode == 0 and b"name=" + name.encode() not in cli("list").stdout, repr(killed.stderr))
@@ -284,6 +404,7 @@ def main():
         time.sleep(0.7)
         text = cli("screen", "env-probe").stdout
         ok &= check("the record path does not reach the shell", b"E=[]" in text, repr(text[-200:]))
+        ok &= check_hold()
 
         killed_record = os.path.join(ZDIR, "killed-record")
         cli("attach", "--detached", "killed", "/bin/sh", "-c", "sleep 30", extra={"ZMX_EXIT_FILE": killed_record})
@@ -327,7 +448,8 @@ def main():
         if len(sys.argv) > 2:
             ok &= check_upgrade(sys.argv[2])
     finally:
-        cli("kill", NAME, "reclaim", "detached", "killed", "env-probe", "sigterm", "busy", "task", "--force")
+        cli("kill", NAME, "reclaim", "detached", "killed", "env-probe", "sigterm", "busy", "task", "held", "timed",
+            "held-killed", "--force")
         for pid in pids:
             try:
                 os.kill(pid, 9)

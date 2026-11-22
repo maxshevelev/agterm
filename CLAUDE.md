@@ -113,6 +113,11 @@ C-boundary concurrency before changing the bridge.
   In an unpacked zmx tree inside another git checkout, `git apply` treats the tree as a subdirectory of
   that checkout, so it can skip the entire series and still exit 0:
   verify or regenerate the series outside the enclosing checkout.
+  `scripts/zmx-patches/check.py <zmx> <previous zmx>` checks the upgrade from the previous release's zmx; pass
+  `agterm.app/Contents/MacOS/zmx` from a published release's DMG. Against a zmx before 1.0 the new client must
+  refuse `run`, `tail` and `write`; against a later one it must use them. A release predating `0008` keeps the reconnect
+  a follower, so the reclaim check fails and the screen check reads the old leader's grid with the expected
+  output; every other check is the upgrade verdict.
 - Commands:
   - `scripts/run.sh`: setup, generate, Debug build, launch.
   - `scripts/build.sh`: setup, generate, Release build.
@@ -132,6 +137,9 @@ C-boundary concurrency before changing the bridge.
 - The app build's Bundle helper executables phase runs `swift build` on `agtermCore/.build`, so any SwiftPM
   process holding that directory (a hung `swift test` included) stalls `xcodebuild` there with no output;
   check `ps` for one before reading a quiet build as compiling.
+- Every `xcodebuild` hosted run, `make test-app` or `-only-testing`, rewrites `agtermCore/Package.resolved`'s Sparkle
+  pin and hash. Revert it with `git checkout -- agtermCore/Package.resolved` before committing; it is never part of a
+  feature change.
 - An XCUITest or hosted test run that times out at runner init (`Timed out while enabling automation mode`)
   or waits with zero test cases started: see `.claude/rules/ui-tests.md` before retrying or restarting.
 - A TCC-gated tool run from a shell in the live terminal (`screencapture`, XCUITest) can be denied after a

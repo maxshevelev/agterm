@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 GHOSTTY_REPO="https://github.com/ghostty-org/ghostty"
 GHOSTTY_REV="83fb95624b0439ee660c2679b43b38c8b63769cd"  # v1.4.0, 2026-10-27
 ZMX_REPO="https://github.com/neurosnap/zmx"
-ZMX_REV="a35f00a2118b15a5e9d522a43035c8d7487df9b7"  # v1.0.1, 2026-11-06; SessionHostRuntime/DeviceAttributeResponder.swift copies its DA replies
+ZMX_REV="a35f00a2118b15a5e9d522a43035c8d7487df9b7"  # v1.0.1, 2026-11-06
 # This fork builds x86_64 only: the app, its helpers and zmx all ship one Intel slice, and libghostty is
 # built natively, so the build has to run on an Intel Mac.
 if [ "$(uname -m)" != "x86_64" ]; then

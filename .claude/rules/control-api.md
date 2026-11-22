@@ -341,7 +341,10 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   publishes the respawn once the shell shows up, within 60 s of the launch. Holds are counted, one per restart, so a
   refused retry releases only its own. A later restart's confirmed kill, the pane closing, a parent respawn
   (`primaryRespawns`) or, on the server, a recorded exit ends the follow without publishing; a confirmed pane is
-  listed running ahead of the inventory (`OriginConfirmations`). A confirmed reply carries `result.restart` (`paneID`, `oldPid`, `newPid`); they are shell pids, the program
+  listed running ahead of the inventory (`OriginConfirmations`). A held new pane is confirmed only after `exec`:
+  `CommandRestore.isHeldCreation` reads the parked creator's argv, which also makes `paneForeground` nil inside the
+  hold. agterm-server announces the respawn as soon as the new daemon is attachable, before `exec`, since a viewer's
+  attach is what releases it; the Mac publishes after confirmation. A confirmed reply carries `result.restart` (`paneID`, `oldPid`, `newPid`); they are shell pids, the program
   reads back as `foreground`. With no `command` the host replays the pane's foreground program: the
   argv `tree` reports, read through `ForegroundProcess.observed` from a fresh leader listing, filtered by
   host-free `RestartReplay.resolve` and launched through `attachCommand(replaying:)`. It starts in that
@@ -508,7 +511,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   a server window's row is converted by its server (`RemoteOperation.convertCompanion`), as Duplicate as Companion is.
 - `session.companion.move` is its own wire command for the same older-app reason
   (CLI `session move --parent P [--index N]`, too-old text `the running app is too old for companion moves`). `AppStore.moveCompanion` is the seam
-  the sidebar drop, Move to and control share; `canMoveCompanion` and `CompanionMoveRefusal` own the refusals, and
+  the sidebar drop, Move Under and control share; `canMoveCompanion` and `CompanionMoveRefusal` own the refusals, and
   `index` is the slot among the new parent's companions counted without the mover, clamped, nil appending. A top-level
   mover brings its contiguous group, as Convert to Companion does. Each side moves the group it holds: the owner its own
   members, the initiating viewer the rows it shows under the mover, so groupings already diverged stay diverged.
@@ -1998,6 +2001,18 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   `createRemoteSession`, shared by the GUI and control, runs the create once; an unattached session is named with
   `zmx attach HOST ID`, and an undecodable reply is reported as an unknown outcome, never resent. It is in `localOnlyCommands` and `waitsOnNetwork`, and agterm-server
   refuses it as a command that makes a Mac viewer.
+- Every Mac path that can start a program in an origin pane it then attaches sends `ControlArgs.attachPending`
+  (CLI `--attach-pending`): a remote session or terminal companion create with a command, Duplicate as Companion,
+  and `RemoteOperation.attachesPane` and `AttachedForward.attachesPane` (restart, a scratch with a command); paths
+  that start only a plain shell send none. A restart of a pane the window's deck does not lay out sends none
+  either (`Session.rendersPane`); zoom and the Dashboard are not counted. agterm-server binds it per request
+  (`AttachIntent`) and starts a pane running a program, never a plain login shell, with `ZMX_HOLD_UNTIL_ATTACH`
+  (`ServerPanes.attachHoldSeconds`, 30 s); a Mac origin ignores it, since its panes attach locally. A create
+  without it starts at once.
+  It is a timing request with no state, so it has no read-back. An older origin drops the field and starts at
+  once; a stale far `agtermctl` refuses the flag before sending, and only that `refusedArguments` reply is rerun
+  once without it, keeping the operation id (`ControlServer.runRemoteControl`, `RemoteCatalogActions.send`).
+  `site/docs.html#remote-window` states what a user sees.
 - A row carries what a PICKER needs, not only what attach needs. Without that a caller has to run a second
   ssh and join `agtermctl tree --json` by session id, paying another authentication for data the walk
   already held and discarded. The exact fields are below, plus the far node's non-idle
@@ -2230,8 +2245,10 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 - A row attached from another host (`Session.attachedOrigin`; nil for a server window's row and one not yet
   bound) is saved apart in `WorkspaceSnapshot.attached`: its place, view state and binding, never a command,
   cwd or page source, so a build predating the key ignores it rather than starting a shell in it. `bindRemote`
-  saves, since `addSession` saved before the binding existed. A relaunch runs the saved attach lines WITHOUT the
-  lead claim (`attachedSession(from:)`), and `ControlServer.checkRestoredOrigin` asks each host once. A terminal
+  saves, since `addSession` saved before the binding existed. A relaunch, or a reopened window, runs the saved attach
+  lines WITHOUT the lead claim (`attachedSession(from:)`) but with `ZMX_MANAGED_RECLAIM` set to the pane's saved
+  `lead` (`ZmxLeadBook.savedLead` at save, nil while it followed), so it takes back an idle vacancy fill
+  the way a reconnect does (Pane lead), and `ControlServer.checkRestoredOrigin` asks each host once. A terminal
   session the tree lists is alive; one it leaves out closes the row (`closeEndedAttachedRow`, the row alone through
   `closeExactly`, its companions moving up and each checked on its own) only when
   the host's complete `zmx list` has no claim for it, since a session in a window closed there is left out but
@@ -2598,7 +2615,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   starts is managed; a stock client on the same daemon keeps upstream behaviour.
 - `zmx.attach` claims in every pane, so the attaching Mac's grid applies with no key press. A local pane
   attaches WITHOUT the claim: it leads a daemon nobody leads, and one relaunched under another Mac's lead
-  comes back covered instead of taking it.
+  comes back covered instead of taking it, unless it reclaims the lead it saved (below).
 - The client reports its role as a TITLE, `OSC 2;zmx-role;<nonce>:<unowned|leader|follower>:<generation>`,
   intercepted in `GhosttyCallbacks` ahead of `applyTitle`. Not OSC 777: libghostty drops a desktop
   notification that follows another within one second APP-WIDE (`Surface.zig showDesktopNotification`),
@@ -2634,6 +2651,16 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   zmx patch 0008 decides at Init, in one step: the reconnect leads while the leader is that attach, matched by the
   token every managed client sends in `Identity`, or one that filled a vacancy without a claim and has sent no
   key, paste or mouse press since. Anything else leaves it following, so it never takes a lead someone used.
+  A pane's first attach after a window restore, launch or reopen, reclaims the same way. Each save writes
+  `ZmxLeadBook.savedLead` per pane identity: the state's `reclaimAfterDrop`, for a pane not attached since the
+  restore its armed value, and for one parked to reconnect, whose state `remotePaneStopped` dropped, its
+  `RemoteReconnectBook` entry's `reclaim`. An attached row's attach line takes `AttachedOriginSnapshot.Pane.lead` directly. The
+  others go through `ZmxLeadBook.arm`: `SessionSnapshot.leads` (local Live primary, split and scratch) in
+  `AppStore.restore`, never `session(from:)`, which also rebuilds Recent Closed rows, and
+  `RemoteWindowViewState.SessionView.leads` on the mirror's FIRST snapshot only, which disarms whatever that
+  reconcile did not attach. The attach reads `pendingReclaim` and `begin` consumes it, so a fallback launch
+  without a daemon keeps it; `finalizePaneIdentities` forgets a closed session's panes, scratch included.
+  A remote window's claim wins, and its scratch, which is not managed, never reclaims.
   `zmx type` and `zmx send` are not use. An older daemon ignores `Identity` and the reconnect follows as before. In place repair was rejected: libghostty
   reports a new grid before its terminal has it, and the role report reaches the app a main-queue hop
   after the bytes behind it, so a replay could be parsed at the old grid.
