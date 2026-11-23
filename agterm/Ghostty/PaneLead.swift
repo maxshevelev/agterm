@@ -111,7 +111,12 @@ enum PaneLead {
             RemoteReconnectBook.shared.retryNow(pane: pane, now: Date())
             return
         }
-        guard view.leadCovered, !ZmxLeadBook.shared.reattaching(pane: pane) else { return }
+        guard view.leadCovered else { return }
+        if let pane, let state = ZmxLeadBook.shared.states[pane], state.reattaching {
+            // as a key does: a reattach that claims nothing takes the lead with its first report
+            if !state.attachment.claim { ZmxLeadBook.shared.claimOnReport(pane: pane) }
+            return
+        }
         reattach?(view, true)
     }
 }

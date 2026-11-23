@@ -149,6 +149,20 @@ final class PaneLeadTests: XCTestCase {
         XCTAssertEqual(reattached.count, 1)
     }
 
+    func testAClickOnAReconnectThatClaimsNothingTakesTheLeadOnItsFirstReport() throws {
+        let identity = UUID()
+        panes.append(identity)
+        let view = GhosttySurfaceView(workingDirectory: NSTemporaryDirectory(),
+                                      env: ["AGTERM_PANE_ID": identity.uuidString], backedByZmx: true)
+        ZmxLeadBook.shared.begin(ZmxLeadAttachment(nonce: "n", claim: false), pane: identity, reattaching: true)
+
+        PaneLead.clicked(view)
+        XCTAssertTrue(reattached.isEmpty, "the reattach on its way is not replaced")
+
+        PaneLead.report(try notice("n:follower:1"), from: view)
+        XCTAssertEqual(reattached.map(\.claim), [true])
+    }
+
     func testAClickOnAPaneThatLeadsTakesNothing() throws {
         let (view, _) = pane()
         PaneLead.report(try notice("n:leader:1"), from: view)
