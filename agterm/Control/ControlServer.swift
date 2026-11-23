@@ -762,7 +762,7 @@ final class ControlServer {
                 .configReload, .themeSet, .themeList,
                 .sidebar, .sidebarMode, .sidebarFlaggedLayout, .sidebarDensity, .sidebarExpand, .sidebarCollapse,
                 .sidebarWidth, .sessionType, .sessionCopy,
-                .sessionPaste, .sessionSelectAll,
+                .sessionPaste, .sessionPasteText, .sessionSelectAll,
                 .sessionSearch, .sessionOverlayOpen, .sessionOverlayClose, .sessionOverlayResize,
                 .sessionOverlayReload, .sessionOverlayNavigate,
                 .sessionOverlayResult, .sessionOverlaySubmit, .sessionOverlayCopy, .sessionOverlayText,

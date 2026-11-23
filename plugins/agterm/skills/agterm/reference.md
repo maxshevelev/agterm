@@ -298,7 +298,9 @@ of `{id, kind, active, visible, backedByZmx?, lead?, reconnect?, attachEnded?, p
 `left`|`right`|`scratch`|`overlay`|`overlay-left`|`overlay-right`).
 Primary/split surfaces report `backedByZmx`, a Live scratch reports `true`, and other scratches and overlays omit it. `paneID` is the surface's
 stable token, the value `--pane-id` takes; it follows the terminal through a swap and is omitted for an
-overlay or a pane whose surface is not created yet. `pendingMessages` counts the messages waiting in the
+overlay or a pane whose surface is not created yet. In Live mode a split hidden since a relaunch reports it
+while its program runs. That id names the pane even before its surface exists: `msg` and `zmx kill --pane-id` reach it,
+and a command that needs a surface refuses it until the surface exists. `pendingMessages` counts the messages waiting in the
 pane's [msg](#msg) mailbox and is omitted at zero. `remote` is `true` on an origin's main or split pane whose
 next ask, overlay or page goes to an attached Mac (see Remote sessions), omitted otherwise. `lead` is `leader`, `follower`
 or `unowned`: whether this Mac's window size is the one the pane's program sees. A pane that does not
@@ -741,7 +743,8 @@ error keeps those names for compatibility.
   `session text`, no `other` value. `--pane-id` takes a stable pane token (`$AGTERM_PANE_ID`, or
   `surfaces[].paneID` from `tree --json`) and types into that terminal wherever it sits now, overriding
   `--pane`. An unknown token without `--pane` fails with `unknown pane id: <id>`; with `--pane` it uses
-  that pane. `result.pane` names the pane typed into. `--select` realizes the MAIN pane only — a split pane must
+  that pane. A split still hidden since a Live relaunch has no terminal yet, so its id answers
+  `session not realized` until the surface exists, as `--pane right` does. `result.pane` names the pane typed into. `--select` realizes the MAIN pane only — a split pane must
   already exist. Also like `session text`, there is no overlay value: every `--pane` types into the surface
   UNDER a covering overlay, so the keystrokes reach the hidden shell and run there unseen until the overlay
   closes — the call still answers `ok`. That is deliberate: the panes stay drivable whatever is drawn over
@@ -769,6 +772,13 @@ error keeps those names for compatibility.
   nothing, and a second paste while the pane is copying answers `a paste is still copying`. Claude Code attaches
   a pasted image path, so ⌘V, not Ctrl-V, pastes a screenshot into Claude Code in a remote pane: its own Ctrl-V
   reads the clipboard of the host it runs on. A ghostty.conf paste binding, and the bundled one at the V position on a Latin alternative layout, paste text only there.
+- `session paste --stdin [--pane left|right|scratch] [--pane-id ID] [--target] [--window W]` — paste the text
+  read from stdin as a paste (wire `session.paste.text`), leaving the clipboard alone: bracketed when the program
+  turned bracketed paste on, so it lands unsubmitted; otherwise each newline submits. `--pane-id` takes
+  `$AGTERM_PANE_ID` and wins over `--pane`, as in `session type`. Selected control bytes, including ESC, BS, DEL, Ctrl-C,
+  Ctrl-Z, Ctrl-U and Ctrl-W, become spaces; other control bytes and tab pass through, and without bracketed paste each LF
+  arrives as CR. Empty stdin and NUL are refused. An app predating it rejects the request before pasting, usually with `the running app is too old for text paste`. agterm-server
+  refuses it directly; a Mac showing a server row pastes through its own pane.
 - `paste receive` — internal, run by agterm over ssh on the host where a pasted file must land; never run it by
   hand.
 - `session select-all [--target] [--window W]` — select the session's entire terminal buffer (main pane),
@@ -825,7 +835,8 @@ error keeps those names for compatibility.
   builtin or a loop included), when the program cannot be read (`sudo`, `top`), when its directory is
   unavailable or when it is in `restore-denylist.conf`; pass `--command` then. An empty `--command`
   is an error, never a replay. The pane keeps its place, stable id and `AGTERM_*` environment and
-  starts blank; nothing is typed. Works on a hidden split and in a background window. Reply after the new
+  starts blank; nothing is typed. Works on a hidden split and in a background window, except that a split still
+  hidden since a Live relaunch on the Mac running it answers `session not realized` until its surface exists. Reply after the new
   shell exists: `restart.oldPid`, `restart.newPid`, `restart.paneID`, `pane`. Those are the pane's shells;
   read the program from `tree`'s `foreground`/`splitForeground`. Live sessions mode, a local pane or a row of
   an agterm-server window (its server restarts it; an Ended row there takes `--command` on the left pane), or a
@@ -2102,10 +2113,10 @@ terminal, and the receiver reads it when it chooses. Mailboxes live in the runni
 is drawn on screen.
 
 - `agtermctl msg send TEXT|--stdin (--to SESSION:PANE ... | --all [--workspace W]) [--as SESSION:PANE-ID]`
-  (`msg.send`). PANE is a pane id (`surfaces[].paneID` from `tree --json`) or `left` (alias `primary`, `top`), `right`
+  (`msg.send`). PANE is a pane id (`surfaces[].paneID` from `tree --json`, or the session's `scratchPaneID` for a hidden scratch) or `left` (alias `primary`, `top`), `right`
   (`split`, `bottom`) or `scratch`, resolved once at send time; a bare session is an error. Aliases of one pane are delivered
   once. `--all` reaches every live pane in every open window except the sender and remote rows;
-  `--workspace` narrows it (`root` for the top-level sessions). A split hidden since launch has no terminal yet and is not a live pane.
+  `--workspace` narrows it (`root` for the top-level sessions). In Live mode a pane with no terminal yet, such as a split or scratch hidden since a relaunch, is live while its program runs.
   The reply carries `messageID` (shared by every copy), `delivered` (canonical `SESSION:PANE-ID`
   addresses) and `rejected` (`{address, reason, detail?}`, reason `mailbox full` or `unknown pane`; `detail`
   says more, as `remote session` does). The CLI prints the id, one stderr line per rejection (the detail when
@@ -2565,8 +2576,8 @@ it asks for the microphone again; the reset ends those sessions' processes at th
 them under the host, starting their captured commands again where possible. It also covers every session
 whose daemon predates the recorded first launch with this zmx build: live sessions keep the zmx they started
 with through updates, so they miss a zmx change until recreated. It also moves every session still under
-the session host of an earlier agterm build or login, which can block local network access after an
-update, to the current host; at every launch agterm asks each earlier host to stop, and one stops once no live session runs under it. agterm quits and reopens itself
+the session host of an earlier agterm build or login, which can block microphone or local network access
+after an update, to the current host; at every launch agterm asks each earlier host to stop, and one stops once no live session runs under it. agterm quits and reopens itself
 right after answering, so running work in the affected sessions stops and agent conversations may need to be
 resumed by hand; run from inside one of those sessions it kills the calling shell. Other supervised
 sessions are left alone. It refuses outside Live sessions mode, while a mode change waits for a restart,

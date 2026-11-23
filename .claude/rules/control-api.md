@@ -182,7 +182,7 @@ renumbering. Do not reintroduce a count anywhere.
   `.expand`, `.tint`
 - `session.new`, `.duplicate`, `.remote.new`, `.companion.new`, `.companion.page`, `.companion.duplicate`, `.companion.convert`, `.companion.move`, `.companion.promote`, `.companion.page.attach`, `.page`, `.collapse`, `.expand`, `.close`, `.terminate`, `.select`, `.rename`, `.reveal`, `.move`, `.type`, `.split`,
   `.split.close`, `.swap`, `.lead`,
-  `.scratch`, `.focus`, `.resize`, `.go`, `.copy`, `.paste`, `.selectall`, `.text`, `.search`, `.status`,
+  `.scratch`, `.focus`, `.resize`, `.go`, `.copy`, `.paste`, `.paste.text`, `.selectall`, `.text`, `.search`, `.status`,
   `.flag`, `.tint`, `.info`, `.seen`, `.restore`, `.restart`, `.background`, `.overlay.open`, `.overlay.close`, `.overlay.resize`,
   `.overlay.reload`, `.overlay.navigate`,
   `.overlay.result`, `.overlay.submit`, `.overlay.copy`, `.overlay.text`, `.overlay.job.run`, `.overlay.page.serve`, `.overlay.hide`,
@@ -611,6 +611,15 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   `session.copy` read-back having no pane either. Omitted, and for select-all always, the pane is
   `Session.addressableSurface = surface ?? splitSurface`, never focus-aware `activeSurface`, so select-all
   and copy share one pane. Read paste through text and select-all through copy.
+- `session.paste.text` (CLI `session paste --stdin`) is its own wire command, never a `text` field on
+  `session.paste`: an older app already decodes `args.text` and would ignore it, pasting the clipboard instead.
+  It goes through `bindingSurface` plus `--pane-id` (`Session.paneAddress`), then `insertPasted`, which is
+  `ghostty_surface_text`: bracketed when the program set mode 2004, no paste-protection prompt, and selected control
+  bytes, including ESC, BS, DEL, Ctrl-C, Ctrl-Z, Ctrl-U and Ctrl-W, replaced with spaces by libghostty's paste encoder, so
+  the text cannot close the bracket; other C0 bytes and tab pass through, and LF becomes CR without mode 2004.
+  `insertPasted` returns nothing, so the arm checks `isRealized` after the expedite. Not in `waitsOnNetwork`:
+  it copies nothing. agterm-server refuses it (`ServerCommandPolicy`) by approved exception: only the daemon's
+  terminal knows mode 2004, so parity needs a zmx patch. Read back through `session.text --pane-id`.
 - Keep standard SwiftUI Edit routing. `GhosttySurfaceView` implements Copy/Paste/Select All and validation;
   focused text fields retain their behavior, terminal Cut stays absent. Do not replace the combined
   pasteboard command group. Remove the separate Undo/Redo group because Command-Z belongs to Reopen Closed
@@ -1529,7 +1538,11 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   fall back on, and `result.id` is the resolved `surface:<session>:<position>`. `ControlActions` keeps
   the two-argument requirement and defaults the overload to refuse a token by name.
 - Each tree surface node carries `paneID`, the live surface's token, omitted for a slot whose surface
-  carries none (an overlay, or a pane whose surface is not created yet).
+  carries none (an overlay, or a pane whose surface is not created yet). A Live split hidden since a relaunch reports
+  its identity while its daemon runs (the mail predicate): `msg` and `zmx.kill.pane` take it, and
+  `Session.paneRole(forToken:)` resolves a surfaceless slot by its identity, so a command needing a surface
+  refuses it rather than answering `unknown pane id`. `paneToken(for:)` keeps the daemon gate, the server's
+  mail predicate. A token that matched a primary with no surface never falls back to the split.
 - `session.status --pane-id` (#199) falls back to the role for an absent or unknown token and adds no
   read-back field: it reports only the resolved `statusPane`.
 - Auto-reset clears both session entered and session left. Status renders on selected sessions too.
@@ -1590,8 +1603,14 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   shapes the reply; `ControlActions` only resolves an address to a live pane, lists the `--all` panes and
   reports a queued message. A host without the bus answers `MessagePaneError.unsupported`, which refuses the
   whole command; only `.unresolved` becomes a per-recipient `unknown pane` rejection.
-- A live pane is a realized surface with a parseable token, the one definition recipients, identities and
-  `--all` share; a split hidden since launch has none. `ControlServer+Messages` resolves the session across
+- A live pane is a realized surface with a parseable token, or, in a Live launch, a locally owned pane with no
+  realized surface whose daemon the kernel finds (`AppStore.daemonProbe`): the one definition recipients, identities,
+  `--all` and the tree's daemon-based `paneID` fallback share; a realized surface's token and `scratchPaneID` stay
+  identity metadata, published whatever a probe answers. Such a pane's leader pid is recorded and checked on every mail access, a
+  realized surface included, since its attach can still replace the daemon: an unknown probe refuses and drops
+  nothing, an absent one (no socket at the pane's name) and a different pid drop the earlier mail first. A primary exit
+  promotes a surfaceless split unless its probe is absent. The queued event routes by the recipient's canonical
+  session and never re-probes. `ControlServer+Messages` resolves the session across
   every open store with `window: nil`, never the frontmost default, then asks `AppStore.messagePane`.
 - An identity is `SESSION:PANE-ID` only and must be a live pane of that session, on send, read and ack alike.
   There is no fallback to a role or the active pane, and a stale or incomplete identity never becomes an

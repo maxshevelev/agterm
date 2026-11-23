@@ -144,11 +144,18 @@ Check these in order:
   session keeps the zmx it was created with through app updates. `agtermctl zmx list` marks such rows
   `outdated`; Agterm ▸ Reset Live Sessions… (or `agtermctl zmx reset --force`) recreates them on the current
   zmx, with the same cost as any reset: running work stops and agent conversations need resuming.
-- **An older live session cannot reach the local network after an update, or reports `No user exists for
-  uid 501` after a forced logout.** A changed helper build or a new login gets its own session host, and a session
-  keeps the host it started under; `agtermctl tree --json` marks it `liveHostStale`. Agterm ▸ Reset Live
-  Sessions… (or `agtermctl zmx reset --force`) moves it to the current host, with the same cost as any reset;
+- **An older live session cannot use the microphone or reach the local network after an update, or reports
+  `No user exists for uid 501` after a forced logout.** A changed helper build or a new login gets its own session
+  host, and a session keeps the host it started under; `agtermctl tree --json` marks it `liveHostStale` (or
+  `splitLiveHostStale` for its right pane). An update deletes the earlier host's program file, and macOS can then
+  refuse that session's microphone requests; a new live session still works. The mark alone is no reason to
+  reset. Agterm ▸ Reset Live Sessions… (or `agtermctl zmx reset --force`) moves it to the current host: it ends
+  and recreates the panes it selects, which can include working panes, with the same cost as any reset;
   at every launch agterm asks each earlier host to stop, and one stops once no live session runs under it.
+  One pane moves alone with `agtermctl session restart --target <session> --pane left --command '<command>'`
+  (`--pane right` for the split) run from another pane: it ends that pane's shell and program and starts the
+  command in a new shell; without `--command` it refuses a pane at a shell prompt. After a successful
+  restart the pane should read `supervisor` with no stale mark.
 - **Live sessions close about 30 seconds after a GUI program starts from one.** macOS force-quits a program
   switched off in System Settings ▸ General ▸ Login Items ▸ Allow in the Background, together with the
   coalition it started in (#985). On macOS 27 and later the session host runs as its own launchd job, so
@@ -372,7 +379,8 @@ Claude Code's hyperlink allowlist lacks that name, so it prints the URL. agterm 
 Workaround: `FORCE_HYPERLINK=1 claude` (Claude Code reads it before any terminal check), or
 `env = FORCE_HYPERLINK=1` in `~/.config/agterm/ghostty.conf` for every new shell, after a config reload
 (`agtermctl config reload` or File ▸ Reload Config) and a new session; that form also forces links into
-redirected output. `env = TERM_PROGRAM=ghostty` there does nothing: agterm applies its identity after the
+redirected output. Open rules skip OSC 8 file links, so `FORCE_HYPERLINK=0 claude` keeps printed paths
+reaching them. `env = TERM_PROGRAM=ghostty` there does nothing: agterm applies its identity after the
 config file. Do not file an agterm issue for it; the fix belongs upstream (Claude Code recognizing `agterm`
 or `TERM=xterm-ghostty`).
 

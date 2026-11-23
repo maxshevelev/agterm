@@ -490,7 +490,7 @@ command &quot;Session here&quot; ctrl+a&gt;n agtermctl session new --cwd &quot;$
 <h3 id="workspaces-sidebar">The sidebar</h3>
 <ul>
 <li>The sidebar is a two-level tree: the top-level sessions first, with no row above them, then the workspaces, each holding sessions. A workspace row has a filled folder icon, a session row an outlined terminal.</li>
-<li>A session is named after its working directory's last folder. Renaming pins a name of your own; clearing it restores automatic naming. Rename inline by double-clicking a row's name.</li>
+<li>An unnamed terminal session uses the focused pane's terminal title when it has one, or else the last folder of its working directory. In a local window, a split reopens with focus on its left or top pane. Renaming pins a name of your own; clearing it restores automatic naming. Rename inline by double-clicking a row's name.</li>
 <li>The four icons at the bottom of the sidebar add a workspace, add a session, and toggle the workspace filter and the flagged view.</li>
 <li>A click on a workspace's icon folds it at once.</li>
 <li><strong>Copy Name</strong> on a session or workspace row copies its name.</li>
@@ -664,6 +664,7 @@ agtermctl session overlay open --html report.html --page</code></pre>
 <li>⌥⌘← and Ctrl-1 focus the left or top pane, ⌥⌘→ and Ctrl-2 the right or bottom one. On a hidden split they swap which pane is shown. <code>agtermctl session focus</code> with no pane switches to the other one.</li>
 <li>The divider follows the axis and remembers its position. Drag it to resize, double-click it for an even split.</li>
 <li><strong>Close Split</strong> in the action palette ends the second pane, whatever it is running.</li>
+<li>When the first pane's shell exits, the second pane takes its place and the session stays. In Live mode that includes a split still hidden since a relaunch, while its program runs.</li>
 <li><strong>Swap Panes</strong> (View or the action palette) exchanges the two terminals without restarting them. The primary and split roles follow the positions, focus follows its terminal, and the divider stays put. <code>agtermctl session swap</code> does the same, also while the split is hidden.</li>
 </ul>
 <h3 id="terminals-quick">Quick terminal</h3>
@@ -1659,7 +1660,7 @@ for (const ws of tree.workspaces) for (const s of ws.sessions) {
 </tr>
 </tbody>
 </table>
-<p>A tool that picks capabilities from a list of terminal names may need its own override. Claude Code prints links as plain text until <code>FORCE_HYPERLINK=1</code> is set; see <a href="https://github.com/umputun/agterm/blob/master/docs/troubleshooting.md#claude-code-prints-links-as-plain-text-instead-of-clickable-labels">troubleshooting</a>.</p>
+<p>A tool that picks capabilities from a list of terminal names may need its own override. Claude Code prints links as plain text until <code>FORCE_HYPERLINK=1</code> is set; see <a href="https://github.com/umputun/agterm/blob/master/docs/troubleshooting.md#claude-code-prints-links-as-plain-text-instead-of-clickable-labels">troubleshooting</a>. File links that Claude Code emits as OSC 8 skip <a href="#keymap-open">open rules</a>.</p>
 <h3 id="agtermctl-sessions">Sessions and workspaces</h3>
 <p><strong>See and create</strong></p>
 <pre class="bash"><code>agtermctl tree                                   # the workspace/session tree with ids
@@ -1705,6 +1706,7 @@ agtermctl session type --target &quot;$id&quot; $&#39;echo hi\n&#39;   # a backg
 sel=$(agtermctl session copy --target 9f3c)          # the selection; the clipboard is untouched
 agtermctl session text --pane scratch --target 9f3c  # the pane&#39;s text
 agtermctl session paste --target 9f3c                # paste the clipboard, like ⌘V
+printf &#39;a\nb\n&#39; | agtermctl session paste --stdin   # paste text, unsubmitted where the program allows
 agtermctl session select-all --target 9f3c           # like ⌘A; session copy then reads it</code></pre>
 <h3 id="agtermctl-panes">Splits, scratch, quick terminal and search</h3>
 <pre class="bash"><code>agtermctl session split toggle --axis horizontal   # vertical = left/right, horizontal = top/bottom
@@ -2008,6 +2010,7 @@ agtermctl msg ack ID                                              # remove what 
 agtermctl msg read --ack --wait --timeout 60                      # wait for mail and take it</code></pre>
 <ul>
 <li>Every live pane has a mailbox; the receiver reads it when it chooses and acknowledges what it handled.</li>
+<li>In Live mode a split or scratch still hidden since a relaunch takes mail while its program runs.</li>
 <li>Run inside a pane, <code>agtermctl msg</code> acts as that pane through <code>AGTERM_SESSION_ID</code> and <code>AGTERM_PANE_ID</code>.</li>
 <li>Mail lives in the running app only: closing or restarting the pane, closing its session, workspace or window, or quitting agterm drops it.</li>
 <li>A full mailbox refuses that recipient alone.</li>
@@ -2679,8 +2682,10 @@ Settings ▸ General ▸ Restore sessions. The note under it is a reminder that 
 <ul>
 <li>a tool in a session created before session-host support asks for the microphone after every update;</li>
 <li>a session needs a Live fix that reaches only new sessions;</li>
+<li>a session under an older build's session host cannot use the microphone after an update;</li>
 <li>a session under an older build's or another login's session host cannot reach the local network.</li>
 </ul>
+<p>For the session host problems, one pane can move to the current host without the reset: <code>agtermctl session restart</code> replaces just that pane's shell and running program and runs the command you give it with <code>--command</code> (<a href="https://github.com/umputun/agterm/blob/master/docs/troubleshooting.md#a-live-session-started-before-an-update-or-a-logout-cannot-use-the-microphone-or-the-local-network">troubleshooting</a>).</p>
 <p>The dialog shows how many sessions the reset can affect. It can include working sessions that predate the last Live update or still use an earlier session host. Their running work stops, and recorded commands restart where possible; agent conversations may need resuming by hand. Other sessions are untouched. Another Mac attached to a reset session may need to attach it again.</p>
 <p>With banners on, a notification appears only when something went wrong: some sessions could not be reset (run it again for the rest), or the session list could not be read and nothing was reset. <code>agtermctl zmx reset --force</code> skips the dialog.</p>
 <figure class="narrow">
@@ -2689,7 +2694,7 @@ Settings ▸ General ▸ Restore sessions. The note under it is a reminder that 
 The confirmation names how many sessions it resets and why.
 </figcaption>
 </figure>
-<p>Microphone requests from panes created through the session host stay attributed to agterm across restarts (<a href="https://github.com/umputun/agterm/blob/master/docs/troubleshooting.md#agterm-would-like-to-access-data-from-other-apps-keeps-coming-back">troubleshooting</a>).</p>
+<p>Microphone requests from panes under the current session host stay attributed to agterm across restarts (<a href="https://github.com/umputun/agterm/blob/master/docs/troubleshooting.md#agterm-would-like-to-access-data-from-other-apps-keeps-coming-back">troubleshooting</a>).</p>
 <h4 id="restore-from-the-command-line">From the command line</h4>
 <p>These need agterm running: only the app knows a leftover program from a closed window's.</p>
 <table>
