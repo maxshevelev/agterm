@@ -3,7 +3,7 @@ import SwiftUI
 
 /// PaneLeadCover covers a pane whose zmx client does not lead, since its terminal is laid out for another
 /// client's grid. It stays mounted so the pane's ZStack keeps one shape (see `sessionDetail`). The cover
-/// takes hits and a click acts like a key press; the remote notice draws uncovered too and never takes hits.
+/// takes hits and a click takes the lead, as a key does; the remote notice draws uncovered too and never takes hits.
 /// Every host of a pane's terminal, a Live scratch's included, mounts one directly over it, under any pane overlay.
 struct PaneLeadCover: View {
     let session: Session
@@ -12,6 +12,8 @@ struct PaneLeadCover: View {
     var foreground = WindowContentView.resolvedChromeText()
     /// The pane sits under its own pane overlay, which draws on a transparent backing.
     var hidden = false
+    /// False in a dashboard cell, which owns the click and the keys, so the cover offers no takeover there.
+    var interactive = true
 
     var body: some View {
         let identity = session.paneIdentity(for: pane)
@@ -26,8 +28,8 @@ struct PaneLeadCover: View {
                     let state = identity.flatMap { book.states[$0] }
                     Text(Self.title(state: state, remote: session.remoteHost != nil))
                         .font(.system(size: 14, weight: .medium))
-                    if state?.reattaching != true || state?.attachment.claim == false {
-                        Text("Press any key or click to use it here")
+                    if let hint = Self.hint(state: state, interactive: interactive) {
+                        Text(hint)
                             .font(.system(size: 12))
                             .opacity(0.7)
                     }
@@ -45,7 +47,12 @@ struct PaneLeadCover: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { takePane() }
-        .allowsHitTesting(covered)
+        .allowsHitTesting(covered && interactive)
+    }
+
+    static func hint(state: ZmxLeadState?, interactive: Bool) -> String? {
+        guard interactive, state?.reattaching != true || state?.attachment.claim == false else { return nil }
+        return "Press any key or click to use it here"
     }
 
     static func title(state: ZmxLeadState?, remote: Bool) -> String {
@@ -61,9 +68,7 @@ struct PaneLeadCover: View {
         case .scratch: session.scratchSurface
         }
         guard let view = surface as? GhosttySurfaceView else { return }
-        // focus first: the replacement inherits focus only from a surface that holds it
-        view.focusAfterReparent()
-        PaneLead.clicked(view)
+        PaneLead.coverClicked(view)
     }
 }
 

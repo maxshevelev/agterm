@@ -2791,7 +2791,7 @@ every pane at once; the same panes on the Mac the session runs on are covered ("
 Each pane's `lead` in `tree` reads `leader`, `follower` or `unowned`. It is absent when the pane has no
 daemon to lead, which is every local pane outside Live sessions mode (`agtermctl restore mode`), and when
 an agterm on either side predates the lead. `agtermctl session lead [--pane left|right]` takes the lead
-for this Mac, as pressing a key or clicking on the cover does.
+for this Mac, as a key press or click on the cover does.
 
 A pane or scratch that reconnects after its ssh dropped takes the lead back when this Mac led it at the drop and
 nobody has used it since: this Mac's lost connection still holds the lead, or another Mac took it only

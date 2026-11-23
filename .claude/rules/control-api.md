@@ -50,6 +50,8 @@ paths:
   an event carrying `agent_id` adds `--if-idle` to `active`, and a Stop whose `background_tasks` lists a
   running subagent, workflow or shell posts `active --blink` in place of `completed`, dropping the caller's flags
   so `--auto-reset` cannot idle the row. Anything else, an unreadable payload included, posts argv.
+  `AGTERM_CLAUDE_IGNORE_SHELLS=1` (exactly `1`) in Claude's environment drops shells from that running set; it is a
+  hook-local knob because the hook decides before the status reaches the app, and agterm-server has no settings to read.
 - Codex maps SessionStart idle; prompt/pre/post tool active; Stop ending `?` blocked, otherwise completed.
   Those first four report nothing for a null `transcript_path`: Codex's ephemeral memory consolidation
   thread fires them but never a user Stop, so they would leave the pane active.
@@ -2659,6 +2661,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   before and is never covered. A role change emits `tree.changed`.
 - A pane that does not lead is covered (`PaneLeadCover`), by every host of its terminal: the deck, where
   it sits BELOW the pane's own pane overlay and hides while one is up, terminal zoom, and the dashboard.
+  A dashboard cell's cover takes no click and offers no takeover, since the cell owns its clicks and keys.
   The daemon ignores a session switch while its leader is managed: the client's nonce, its generation and
   what it reads and types through the daemon are all bound to that one session. Taking the lead is always a FRESH attach into a
   new surface, by the first key or a click on the cover, by `session.lead`, or by itself when the role turns
@@ -2730,9 +2733,9 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   bracketed paste.
 - A covered pane ATTACHED from another Mac refuses all three with `pane is in use on the Mac it runs
   on; take the lead to drive it from here`: its daemon is an ssh away and these reads are synchronous.
-- `session.lead [--pane]` is the control twin of the cover's key. A pane that already leads answers ok;
+- `session.lead [--pane]` is the control twin of the cover's key and click. A pane that already leads answers ok;
   one still attaching without the claim (a reconnect, the unowned retry) answers ok and takes the lead on
-  its first report, as a key on its cover does; one with no reported role answers `pane has no lead to take`; a scratch outside Live
+  its first report, as a key or click on its cover does; one with no reported role answers `pane has no lead to take`; a scratch outside Live
   sessions is refused.
   Read back `lead`.
   It has no menu item or chord: the cover is its GUI surface.
