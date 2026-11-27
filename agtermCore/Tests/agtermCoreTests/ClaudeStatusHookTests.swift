@@ -127,6 +127,18 @@ struct ClaudeStatusHookTests {
         #expect(result.exit == 0)
     }
 
+    @Test func workerSpawnedByAgyStaysSilent() throws {
+        let result = try run(chain: ["login", "agy", "zsh", "claude"], args: ["completed", "--auto-reset"])
+        #expect(result.calls.isEmpty)
+        #expect(result.exit == 0)
+    }
+
+    @Test func workerSpawnedByCopilotStaysSilent() throws {
+        let result = try run(chain: ["login", "copilot", "zsh", "claude"], args: ["completed", "--auto-reset"])
+        #expect(result.calls.isEmpty)
+        #expect(result.exit == 0)
+    }
+
     @Test func nonExecLauncherChainCountsAsOneAgent() throws {
         let result = try run(chain: ["login", "claude", "claude", "node:claude"], args: ["active", "--blink"])
         #expect(result.calls == ["active --blink"])
@@ -219,10 +231,11 @@ struct ClaudeStatusHookTests {
             Issue.record("integration.sh must define the default AGTERM_AGENT_RE as an anchored alternation")
             return
         }
-        let hookText = try String(contentsOf: URL(fileURLWithPath: Self.hook), encoding: .utf8)
-        guard let arm = hookText.components(separatedBy: "case \"$1\" in ").dropFirst().first?
+        let ownerText = try String(contentsOf: root
+            .appendingPathComponent("agterm/Resources/agent-status/agent-owner.sh"), encoding: .utf8)
+        guard let arm = ownerText.components(separatedBy: "case \"$1\" in ").dropFirst().first?
             .components(separatedBy: ")").first else {
-            Issue.record("agterm-claude-status.sh must classify agents with a `case \"$1\" in ... )` arm")
+            Issue.record("agent-owner.sh must classify agents with a `case \"$1\" in ... )` arm")
             return
         }
         let literals = Set(arm.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) })
@@ -347,18 +360,32 @@ struct ClaudeStatusHookTests {
     }
     #endif
 
-    @Test(.enabled(if: !FileManager.default.fileExists(atPath: "/usr/bin/plutil")))
-    func noParserPostsArgv() throws {
+    @Test func linuxReadsThePayloadWithJq() throws {
+        // regression: a GNUstep /usr/bin/plutil, which rejects -extract raw, must not shadow jq on linux
+        let fm = FileManager.default
+        let bin = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("agterm-jq-\(UUID().uuidString)")
+        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: bin) }
+        try "#!/bin/sh\ncat >/dev/null\necho a1\n".writeExecutable(to: bin.appendingPathComponent("jq"))
+
+        let result = try run(chain: ["login", "claude"], args: ["active"], extraEnv: ["OSTYPE": "linux-gnu", "PATH": "\(bin.path):/usr/bin:/bin"],
+                             input: .pipe(Self.payload("PostToolUse")))
+
+        #expect(result.calls == ["active --if-idle"])
+    }
+
+    @Test func noParserPostsArgv() throws {
         let fm = FileManager.default
         let bin = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("agterm-nojq-\(UUID().uuidString)")
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: bin) }
         for tool in ["ps", "dirname"] {
-            try fm.createSymbolicLink(at: bin.appendingPathComponent(tool), withDestinationURL: URL(fileURLWithPath: "/usr/bin/\(tool)"))
+            let path = try #require(["/bin/\(tool)", "/usr/bin/\(tool)"].first { fm.fileExists(atPath: $0) })
+            try fm.createSymbolicLink(at: bin.appendingPathComponent(tool), withDestinationURL: URL(fileURLWithPath: path))
         }
         try fm.createSymbolicLink(at: bin.appendingPathComponent("bash"), withDestinationURL: URL(fileURLWithPath: "/bin/bash"))
 
-        let result = try run(chain: ["login", "claude"], args: ["active"], extraEnv: ["PATH": bin.path],
+        let result = try run(chain: ["login", "claude"], args: ["active"], extraEnv: ["OSTYPE": "linux-gnu", "PATH": bin.path],
                              input: .pipe(Self.payload("PostToolUse", agentID: "a1")))
 
         #expect(result.calls == ["active"])

@@ -242,6 +242,9 @@ pane attached; zmx patch 0013 now holds it until that attach, and the test keeps
 - **Cause, demonstrated.** The archive was down: `archive.ubuntu.com` timed out from a Mac outside GitHub's network
   at the same time, and answered again about 25 minutes after the first failure.
 - **Fix.** None in the repository. Rerun the failed job once the archive answers.
+- **Variant, a mirror mid-sync.** Job 139842358038 (run 45800532014, PR #1113): `security.ubuntu.com` served a
+  `noble-security/main` `Packages.gz` whose size did not match its Release file, apt printed
+  `File has unexpected size ... Mirror sync in progress?` and the step exited 100. Rerun 139844200541 passed.
 
 ### Linux test process killed by SIGPIPE
 
@@ -390,6 +393,19 @@ pane attached; zmx patch 0013 now holds it until that attach, and the test keeps
   Reproduced locally with a pane command that prints a line late while the stub runner holds the copy.
 - **Fix.** The baseline waits until `cat` prints a marker back, which it can only do after `login` wrote its
   banner and exec'd it.
+
+### `CustomCommandRunnerTests.testRepeatingSequenceTailRepeatsUntilEscOrTimeout`
+
+- **Symptom.** `XCTAssertFalse failed - the window times out after release`, then
+  `XCTAssertEqual failed: ("true") is not equal to ("false")` on `sidebarVisible`.
+- **Runs.** Local only, one full `make test-app` on 2026-11-27 at load average 22; the test took 1.33 s against
+  0.77 s alone, and passed alone and in its class.
+- **Cause, demonstrated.** The test spun the run loop 0.7 s for the 0.5 s repeat timer, so a main thread held
+  more than 200 ms left the window open. RunningBoard kept the host at `timer:Tier0`, so App Nap was not it.
+  A main-queue block sleeping 0.7 s from 0.1 s after the release failed the old wait every time.
+- **Fix.** The release asserts the timer's `fireDate` lies 0.5 s after a window bracketing the keyUp, then the test
+  waits up to 5 s for `leaderTimer` to clear. The other fixed waits on the leader and repeat timers in that file
+  take the same form.
 
 ### Earlier hosted failures, already fixed on master
 

@@ -42,7 +42,7 @@ What it does:
 - **Live sessions.** Quit, update, or relaunch agterm while the processes in primary and split panes keep running, an agent mid-turn included. The next launch reattaches to them with their text and TUI state. It is one of three restore modes in Settings ▸ General ▸ Restore sessions, next to fresh shells and re-running the commands captured at quit. Live mode takes effect after restarting agterm and requires zsh or fish as the macOS login shell, or as the absolute path in the ghostty `command` agterm loads.
 - **Remote sessions.** Work in sessions running on another machine over key-based ssh, from another Mac or from a Linux server. A session on another Mac running agterm in Live sessions mode opens as a row in this sidebar, split and companions included, from File ▸ Attach Remote… or with `agtermctl zmx attach --companions`; its status, notifications, HUD, and title-bar context follow it to this Mac ([setup](https://agterm.com/docs#remote-sessions)). A Linux host runs sessions under agterm-server, installed with `agtermctl server install HOST`, and shows them in a remote window; every shell keeps running there when the Mac sleeps or the network drops ([setup](https://agterm.com/docs#remote-server)).
 - **Agent skill.** An installable skill (Help ▸ Install Agent Skill…) teaches Claude Code or Codex the control model and the `agtermctl` commands, so an agent running inside agterm can build its own layout, run overlays, manage windows, and show images inline without you explaining the API.
-- **Agent status.** A coding agent reports its state (active, blocked, or completed) onto its session's row, so you can see which of many running agents needs you. Status hooks for Claude Code, Codex, Pi, OpenCode, and other agents install from Help ▸ Install Agent Status Hooks….
+- **Agent status.** A coding agent reports its state (active, blocked, or completed) onto its session's row, so you can see which of many running agents needs you. Status hooks for Claude Code, Codex, Pi, OpenCode, Antigravity CLI, GitHub Copilot CLI, and other agents install from Help ▸ Install Agent Status Hooks….
 
 A lot of "does it have X?" questions have the same answer: bind X yourself. A `command` line in `keymap.conf` turns any shell line into a key chord, and an overlay gives an interactive program a real terminal over the session, so a file manager, a git UI, or a database browser is one line away. Bigger workflows become scripts, which is what the [cookbook](cookbook/) collects.
 
@@ -55,21 +55,25 @@ For the real terminal work, rendering, VT parsing, and shell I/O, `agterm` embed
 <details>
 <summary>More screenshots</summary>
 
+Claude Code and codex discussing agterm's own code across one split session:
+
+![Claude Code and codex](docs/screenshots/pair-codex.png)
+
 The dashboard: several sessions' live output in one view-only grid, watched at once. A single click drops into any of them:
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
-An agent's interactive prompt mid-session, with attention glyphs on the sessions that need you:
+An agent asking you a question mid-session, in a terminal-style dialog with choices, its session marked blocked until you answer:
 
-![Agent prompt](docs/screenshots/agent-prompt.png)
+![Agent question](docs/screenshots/agent-prompt.png)
 
 The yazi file manager in a floating overlay over the active session, from one `command` line in `keymap.conf`:
 
 ![Floating overlay](docs/screenshots/floating-overlay.png)
 
-A split session, two panes side by side on different color themes:
+Backgrounds of your own: a text watermark behind one pane, a solid color behind the other:
 
-![Split session](docs/screenshots/split-theme.png)
+![Split session with its own backgrounds](docs/screenshots/split-theme.png)
 
 </details>
 

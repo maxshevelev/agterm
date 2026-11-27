@@ -40,7 +40,7 @@
     <meta name="theme-color" content="#191d20" />
     <link rel="preload" href="/assets/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="/style.css?v=3" />
+    <link rel="stylesheet" href="/style.css?v=4" />
     <style>
       .doc-v2 h2 { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 28px; letter-spacing: -0.02em;
         margin: 0 0 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
@@ -970,7 +970,7 @@ agtermctl session new --remote srv --window &quot;$win&quot;                   #
 <p>Close and reattach the session to retry by hand.</p>
 <p><strong>A pane's ssh connection.</strong> The pane keeps its last screen, and what happened shows in a small panel at the bottom of the pane rather than as terminal text.</p>
 <ul>
-<li>If ssh itself failed (exit 255, which a refused login also gives), the panel reads <strong>Connection to HOST lost</strong> and says it is reconnecting. agterm attaches again once the host answers, on the stream's schedule; any key, waking the Mac or a network change retries at once and restarts the schedule. ⌘W still closes the session.</li>
+<li>If ssh itself failed (exit 255, which a refused login also gives), the panel reads <strong>Connection to HOST lost</strong> and says it is reconnecting. agterm attaches again once the host answers, on the stream's schedule; any key, a click on the panel, waking the Mac or a network change retries at once and restarts the schedule. ⌘W still closes the session.</li>
 <li>While the host keeps refusing, the panel adds what ssh said last, such as a changed host key or a rejected login.</li>
 <li>When the host answers, the last screen is replaced before the new connection is up, so a link that drops again right away leaves an empty pane with only the panel.</li>
 <li>The pane takes the lead back only as <a href="#remote-sessions-lead">Who leads a pane</a> describes; otherwise it arrives covered.</li>
@@ -1021,6 +1021,8 @@ agtermctl session new --remote srv --window &quot;$win&quot;                   #
 <p><strong>Agent hooks on the host.</strong></p>
 <ul>
 <li>The Codex hooks need jq on the host; without it they are skipped and the install reports the hooks incomplete.</li>
+<li>Copilot CLI's hooks go to <code>COPILOT_HOME</code> when it is set and not empty, resolved like <code>CODEX_HOME</code>, otherwise to <code>~/.copilot</code>, and only when that directory exists.</li>
+<li>The Claude Code and Copilot CLI hooks read their payload with jq on the host to tell a subagent from the main agent. Without it, a Claude Code subagent's activity replaces the main agent's status and a turn that leaves background agents running reports completed; a Copilot CLI subagent's tool clears a pending permission prompt, its stop reports completed during the turn, and a <code>copilot -p</code> run ends idle.</li>
 <li>Codex's hooks and skill go to <code>CODEX_HOME</code> when it is set and not empty (a relative one is resolved against the working directory), otherwise to <code>~/.codex</code>. A <code>CODEX_HOME</code> that does not exist is reported and skipped.</li>
 <li>OpenCode's plugin is installed only where its config directory exists, for the version <code>opencode --version</code> reports or the one <code>--opencode v1|v2</code> names.</li>
 </ul>
@@ -1190,6 +1192,7 @@ agtermctl session new --remote srv --window &quot;$win&quot;                   #
 <li>Where a new session opens: your home directory (default), the current session's directory, or a folder you pick; and whether New Session adds it at the end of the workspace or right after the current session.</li>
 <li><strong>Restore mode</strong>: fresh shells, re-run commands, or Live sessions (<a href="#restore">Restore &amp; persistence</a>).</li>
 <li>An optional confirmation before closing a session.</li>
+<li><strong>Confirm before quitting</strong> (on by default). Ticking <strong>Don't ask again</strong> in the Quit Agterm? dialog and quitting turns it off; turn it back on here.</li>
 <li>Whether to load your global Ghostty config (<a href="#ghostty">Ghostty config</a>).</li>
 </ul>
 <h3 id="settings-appearance">Appearance</h3>
@@ -1236,7 +1239,7 @@ The Interface tab: title-bar and sidebar controls, plus the quick terminal's siz
 <p>The folder holding <code>keymap.conf</code>, a list of parse errors, and a reload button (<a href="#keymap">Custom commands &amp; keys</a>).</p>
 <p><strong>Lock in agterm</strong> (off by default) picks one of the keyboard layouts enabled in macOS and holds it while any agterm window has the keyboard, including overlays, pickers, dialogs and rename fields. Switching layouts there is undone at once, and your earlier layout returns when you move to another app. A crash or force quit leaves the locked layout selected.</p>
 <figure>
-<img src="/assets/screenshot-keymap-editor.webp" alt="Keymap editor" width="1330" height="828" loading="lazy">
+<img src="/assets/screenshot-keymap-editor.webp" alt="Keymap editor" width="1187" height="696" loading="lazy">
 <figcaption>
 The keymap editor.
 </figcaption>
@@ -2152,6 +2155,7 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 <li>From a HUD or the quick terminal, or while the session's overlay is busy, the file is revealed instead. A hidden page an earlier click opened is replaced, as with a web link.</li>
 <li>Revealing selects the file without running it, so a link in untrusted output pointing at a <code>.app</code> or <code>.command</code> cannot launch it; opening stays a separate, explicit action. A <code>file://</code> link naming another host is ignored, so a stray link cannot trigger a Finder network mount. Web and <code>mailto</code> links open as before.</li>
 </ul>
+<p>Esc or ⌘. closes a picture, markdown, text, log or diff page, one step per press: it first closes the diff file list, clears the search or leaves the find box, and only then closes the page. A clicked <code>.html</code> page, pages opened with <code>--html</code> or <code>--url</code>, and page companions keep Esc for themselves.</p>
 <p><strong>Text pages</strong> run nothing, load nothing and link nowhere: a URL in a log stays text. Long lines run off the right edge until you wrap them; a wrapped line keeps its number on its first row, and the page keeps the choice until it closes. ⌘F always searches what is on top, so over a page or overlay it never reaches the terminal behind.</p>
 <table>
 <colgroup>
@@ -2174,8 +2178,8 @@ Claude Code (left) asks codex (right) to check its reading; the reply arrives in
 <td>next, previous match (a step pauses a following log)</td>
 </tr>
 <tr>
-<td>Esc</td>
-<td>clear the find box</td>
+<td>Esc or ⌘.</td>
+<td>clear the search or leave the find box; otherwise close the page</td>
 </tr>
 <tr>
 <td><code>w</code> or the Wrap button</td>
@@ -2245,9 +2249,9 @@ Claude Code and codex reporting through the installed hooks: two finished (green
 </figcaption>
 </figure>
 <figure>
-<img src="/assets/docs-status-rows.webp" alt="Sidebar with an active, a blocked and a completed session, info lines under two rows, a red and a green tinted row, and the session context in the title bar" width="655" height="233" loading="lazy">
+<img src="/assets/docs-status-rows.webp" alt="Sidebar with info lines under each session, active, completed and blocked statuses drawn as a bolt, a star and a diamond, a teal tinted session, a purple tinted workspace, a companion with its own status and a top-level session" width="345" height="440" loading="lazy">
 <figcaption>
-Active, blocked and completed rows; an info line under two of them; two tinted rows; the selected session's context in the title bar.
+Active, completed and blocked statuses with per-call shapes (bolt, star, diamond); an info line under each session; a tinted session and a tinted workspace; a companion carrying its own status.
 </figcaption>
 </figure>
 <table>
@@ -2456,13 +2460,22 @@ agtermctl session tint clear --target &quot;$AGTERM_SESSION_ID&quot;</code></pre
 <td>OpenCode</td>
 <td>a lifecycle plugin for v1 or v2, when its configuration directory already exists</td>
 </tr>
+<tr>
+<td>Antigravity CLI (<code>agy</code>)</td>
+<td>three hooks (<a href="#status-agy">below</a>), when <code>~/.gemini/config</code> already exists</td>
+</tr>
+<tr>
+<td>GitHub Copilot CLI</td>
+<td>six hooks through an adapter (<a href="#status-copilot">below</a>), when <code>~/.copilot</code>, or <code>COPILOT_HOME</code> if set, already exists</td>
+</tr>
 </tbody>
 </table>
+<p>The Claude Code, Codex, agy and Copilot CLI hooks each give up after 5 seconds, so an agent never waits on a status update agterm is slow to take. Hooks installed by an earlier version get that limit when you run the installer again. Codex hooks you added by hand are not updated: add <code>timeout = 5</code> to each one yourself, as in <a href="#codex-hooks-manual">the manual setup</a>.</p>
 <p><strong>Where it writes</strong></p>
 <ul>
 <li>The scripts go to <code>~/.config/agterm/agent-status/</code>, with the bundled <code>agtermctl</code>'s absolute path baked in, so they work without the CLI on your PATH.</li>
 <li>A marker-guarded line for the shell integration goes into <code>~/.zshrc</code>, <code>~/.bashrc</code> and <code>~/.config/fish/config.fish</code> (fish only when that directory exists). Open a new terminal for it to take effect.</li>
-<li>The Claude Code hooks are merged into <code>~/.claude/settings.json</code> and the six Codex hooks into <code>~/.codex/config.toml</code>. Before changing either, the installer saves a copy beside it with a <code>.bak</code> suffix.</li>
+<li>The Claude Code hooks are merged into <code>~/.claude/settings.json</code>, the six Codex hooks into <code>~/.codex/config.toml</code>, and the agy hooks into <code>~/.gemini/config/hooks.json</code>. Before changing any of them, the installer saves a copy beside it with a <code>.bak</code> suffix. The Copilot CLI hooks get a file of their own, <code>~/.copilot/hooks/agterm-status.json</code>, under <code>COPILOT_HOME</code> when your login shell sets it.</li>
 <li>Running it again upgrades agterm-managed integrations and otherwise changes nothing.</li>
 </ul>
 <h4 id="status-claude">Claude Code</h4>
@@ -2474,6 +2487,7 @@ agtermctl session tint clear --target &quot;$AGTERM_SESSION_ID&quot;</code></pre
 </ul>
 <h4 id="status-codex">Codex</h4>
 <ul>
+<li>When Codex runs as a worker under another agent with a shell between them, as in <code>codex exec</code> from a tool call or a review tool, its hooks stay silent while they run beneath that agent, so the status of the pane that started it is not overwritten.</li>
 <li>A permission request is only a candidate, because it fires before Auto Review. The adapter keeps automatic decisions active and turns the row blocked only once a real approval or structured question appears in that pane.</li>
 <li>On Stop, a final message that ends a sentence with <code>?</code> reports blocked. This is a guess from the text: it ignores code in single and triple backticks, and a <code>?</code> that stands alone, opens quoted text, or sits inside a word (as in a URL query string) does not count. Every other final message reports completed and auto-resets.</li>
 <li><strong>Run <code>/hooks</code> in Codex after installing or upgrading</strong> and approve the hooks. Codex runs changed command hooks only once they are approved, so until then they do nothing.</li>
@@ -2530,6 +2544,21 @@ agtermctl session tint clear --target &quot;$AGTERM_SESSION_ID&quot;</code></pre
 <li>The directory comes from that shell's <code>OPENCODE_CONFIG_DIR</code>, then <code>$XDG_CONFIG_HOME/opencode</code>, then <code>~/.config/opencode</code>. An empty <code>OPENCODE_CONFIG_DIR</code> skips v2 with a warning, and so does a shell configuration that cannot be read while <code>~/.config/opencode</code> exists; without that directory OpenCode is skipped as not installed.</li>
 </ul>
 <p>Re-run the installer after switching major versions. A v2 install removes the agterm-marked v1 plugin in its directory; a v1 install leaves the v2 plugin directory alone. A v1 file you own, or one that cannot be read, is kept and reported in the install result.</p>
+<h4 id="status-agy">Antigravity CLI (agy)</h4>
+<ul>
+<li>The hooks live under the name <code>agterm-status</code> in <code>~/.gemini/config/hooks.json</code>; other named hooks there are kept. A model call reports active, a question or permission request from agy reports blocked until you answer it, and the end of a turn reports completed. Restart agy after installing.</li>
+<li>An <code>agterm-status</code> block installed from the cookbook's <code>antigravity-agent-status</code> recipe is replaced; any other block, such as one with a command of your own or <code>"enabled": false</code>, is left untouched and reported in the install result.</li>
+<li>While background work agy started, such as a command, is still running, the end of the turn reports active instead of completed; agy runs a follow-up turn when it finishes, and that turn completes. To leave background work out, export <code>AGTERM_AGY_IGNORE_BACKGROUND=1</code> in the shell that starts agy. A server agy starts as a daemon never holds the session active.</li>
+<li>When agy runs as a worker under another agent with a shell between them, as in a tool call, its hooks stay silent, and so do those of a Claude Code worker agy starts that way.</li>
+<li>Two gaps remain. agy has no event for a command or edit approval prompt, so those show as active, not blocked. And it reports nothing when it exits, so quitting while background work holds the session active leaves it active until you press Esc or Ctrl-C there or clear it.</li>
+</ul>
+<h4 id="status-copilot">GitHub Copilot CLI</h4>
+<ul>
+<li>A prompt and each finished tool report active, a permission prompt reports blocked until you answer it, and the end of a turn reports completed. Leaving Copilot with <code>/exit</code> or <code>/clear</code> clears the status, while a <code>copilot -p</code> run keeps its completed status. Restart Copilot after installing.</li>
+<li>A <code>copilot-status-hooks.json</code> from the cookbook's <code>copilot-agent-status</code> recipe in Copilot's own <code>hooks</code> directory is moved aside to a <code>.bak</code> copy; a changed one, or an <code>agterm-status.json</code> holding hooks of your own, is left untouched and reported in the install result. A copy of the recipe in a repository's <code>.github/hooks</code> is not touched, so remove it there yourself, or its hooks keep posting beside agterm's in that repository and a subagent's stop still reports completed.</li>
+<li>When Copilot runs as a worker under another agent with a shell between them, as in a tool call, its hooks stay silent, and so do those of a Claude Code worker Copilot starts that way. A subagent's work does not clear a pending permission prompt.</li>
+<li>Five gaps remain. A question Copilot asks you shows as active, not blocked, since Copilot reports a question only after its Autopilot mode has answered it. The main agent's activity can replace a subagent's permission prompt, and when the key that answers that prompt leaves the block in place, the row stays blocked until the main agent's next event. A subagent still running in the background when the turn ends does not keep the session active, as it does for Claude Code and agy, so the turn reports completed while that subagent works. And Copilot reports nothing when a turn is interrupted, so press Esc or Ctrl-C in that pane, as for other agents, to clear the status.</li>
+</ul>
 <h4 id="codex-hooks-manual">Add Codex hooks by hand</h4>
 <p>The installer never rewrites a <code>~/.codex/config.toml</code> it does not own. If that file already defines its own <code>[hooks…]</code> entries, or is not valid TOML, it is left untouched and the install alert sends you here. With <code>CODEX_HOME</code> set, edit <code>&lt;CODEX_HOME&gt;/config.toml</code> instead.</p>
 <p>Check the shape of your existing hooks first, since that is why the installer declined:</p>
@@ -2543,31 +2572,37 @@ agtermctl session tint clear --target &quot;$AGTERM_SESSION_ID&quot;</code></pre
 [[hooks.SessionStart.hooks]]
 type = &quot;command&quot;
 command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; session-start&quot;
+timeout = 5
 
 [[hooks.UserPromptSubmit]]
 [[hooks.UserPromptSubmit.hooks]]
 type = &quot;command&quot;
 command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; user-prompt-submit&quot;
+timeout = 5
 
 [[hooks.PreToolUse]]
 [[hooks.PreToolUse.hooks]]
 type = &quot;command&quot;
 command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; pre-tool-use&quot;
+timeout = 5
 
 [[hooks.PostToolUse]]
 [[hooks.PostToolUse.hooks]]
 type = &quot;command&quot;
 command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; post-tool-use&quot;
+timeout = 5
 
 [[hooks.PermissionRequest]]
 [[hooks.PermissionRequest.hooks]]
 type = &quot;command&quot;
 command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; permission-request&quot;
+timeout = 5
 
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]
 type = &quot;command&quot;
-command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; stop&quot;</code></pre>
+command = &quot;&#39;/Users/you/.config/agterm/agent-status/agterm-codex-status.sh&#39; stop&quot;
+timeout = 5</code></pre>
 <p>The adapter script is already in place: the installer copies it to <code>~/.config/agterm/agent-status/</code> on every run, whether or not the config merge succeeded. Once the blocks are added, run <code>/hooks</code> in Codex and approve them. For a file that is not valid TOML, fixing it and running the installer again is easier: it merges the blocks for you.</p>
 </section>
 

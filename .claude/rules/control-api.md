@@ -38,20 +38,46 @@ paths:
 - Xcode's CLI phase builds Release, copies/signs `agtermctl`, then deep re-signs the app; shallow signing
   fails with `agterm.debug.dylib`. The Help installer links into `/usr/local/bin`, directly or through one
   admin prompt. Host-free `CLIInstall` owns paths/quoting; app code owns filesystem/auth.
-- Agent Hooks installation copies generic, Claude, Codex, Pi, OpenCode, and shell assets under
+- Agent Hooks installation copies generic, Claude, Codex, agy, Copilot, Pi, OpenCode, and shell assets under
   `~/.config/agterm/agent-status`, baking the bundled CLI. Marker merges are idempotent and preserve
   unrelated config; unreadable config is never treated as absent.
+- Every generated status hook carries `AgentHooksInstall.statusHookTimeout` (5 s); Claude Code and Codex
+  otherwise wait 600 s, holding the agent's step on a stalled socket. A re-run adds it to a Claude entry
+  that matches the generated command byte for byte and has no `timeout`; a re-run regenerates the
+  Codex managed block whole.
 - Claude maps prompt/tool work to `active --blink`, Stop to `completed --auto-reset`, and a permission
   request to blocked. `PermissionRequest` fires as the prompt opens.
   `Notification[permission_prompt]` waits about six idle seconds and stays for the sandboxed network
   prompt, which `PermissionRequest` skips. The main thread's PostToolUse clears a prior block because there is
   no answer event; a subagent's cannot, being `--if-idle`.
-  `agterm-claude-status.sh` reads the hook payload (non-terminal stdin, 2-second bound, plutil or jq key paths):
+  `agterm-claude-status.sh` reads the hook payload (non-terminal stdin, 2-second bound, plutil key paths on macOS and
+  jq on Linux, picked by `$OSTYPE` because a Linux `/usr/bin/plutil` may be GNUstep's, which has no `-extract raw`):
   an event carrying `agent_id` adds `--if-idle` to `active`, and a Stop whose `background_tasks` lists a
   running subagent, workflow or shell posts `active --blink` in place of `completed`, dropping the caller's flags
   so `--auto-reset` cannot idle the row. Anything else, an unreadable payload included, posts argv.
   `AGTERM_CLAUDE_IGNORE_SHELLS=1` (exactly `1`) in Claude's environment drops shells from that running set; it is a
   hook-local knob because the hook decides before the status reaches the app, and agterm-server has no settings to read.
+- `agent-owner.sh` holds the worker walk the Claude, Codex, agy and Copilot adapters source
+  (Codex after its watcher entry, before any token or status write); its `is_agent` list must keep every
+  hook-driven agent and the `AGTERM_AGENT_RE` default, which `ClaudeStatusHookTests` pins.
+- agy (installed only when `~/.gemini/config` exists) maps PreInvocation to `active --blink`, PreToolUse on
+  `ask_question|ask_permission` to blocked, and Stop to completed, or `active --blink` while `fullyIdle` is false
+  unless `AGTERM_AGY_IGNORE_BACKGROUND=1`. agy parses every hook's stdout as JSON, so the adapter prints its reply
+  first. Measured on 1.5.16: PreToolUse's `allow` leaves the tool to agy's own permission prompt (the bundled hooks
+  reference says it auto-approves; it does not), SessionStart fires only with the first prompt, Esc and exit fire no
+  hook, and a daemon server leaves `fullyIdle` true. The named hook `agterm-status` is replaced only when every
+  command in it is `AgentHooksInstall.Agy.isAdapterCommand`: our adapter's or the cookbook's path plus one action.
+- Copilot CLI (installed only when `~/.copilot`, or `COPILOT_HOME` resolved like `CODEX_HOME`, exists) gets
+  its own `hooks/agterm-status.json`, rewritten only while every hook in it is our adapter plus one action.
+  The adapter reads the payload as the Claude one does and maps prompt and finished tools to `active --blink`
+  (`--if-idle` with `agentId`),
+  `notification[permission_prompt]` to blocked, the main agent's `agentStop` to completed, and `sessionEnd` to idle
+  unless its reason is `complete` (`-p`). It prints nothing: stdout is parsed as hook output.
+  Measured on 1.0.116: a subagent fires its own `agentStop`, and Autopilot answers `ask_user` itself and fires
+  `elicitation_dialog` after the tool's postToolUse, so questions stay unmapped.
+  A subagent's permission `notification` carries no `agentId` (1.0.117), so only the answering key or the main
+  agent clears its block.
+  A cookbook `copilot-status-hooks.json` identical to the published recipe is moved to `.bak`.
 - Codex maps SessionStart idle; prompt/pre/post tool active; Stop ending `?` blocked, otherwise completed.
   Those first four report nothing for a null `transcript_path`: Codex's ephemeral memory consolidation
   thread fires them but never a user Stop, so they would leave the pane active.
@@ -102,6 +128,11 @@ paths:
   Support. CLI `--socket` overrides. Explicit short paths avoid Unix `sun_path` near 104 bytes. Use 0600.
 - Each connection sets `SO_NOSIGPIPE` and a 5-second receive timeout. Close on non-EINTR read failure,
   including EAGAIN. Start is idempotent and logs bind failure without blocking launch.
+- While `listener` is set, `ControlServer` holds a `userInitiatedAllowingIdleSystemSleep` activity, so the app
+  never naps while it serves. A napped app runs at priority 4, and under CPU load its idle accept and main
+  threads waited 23-40 s for a core (#1108); no request-side change helps, since the clamp is process-wide.
+  The display and the system still sleep on idle. Measured on Debug builds, a napped instance and one holding the
+  activity drew a 20 Hz full-screen redraw at the same 1.1% CPU and idled within noise (1.0% and 0.9%).
 - `agtermctl events` branches on the connect errno: once it holds a cursor it retries `ECONNREFUSED`
   with that cursor, bounded by `EventStreamState.retryBudget`, and treats every other failure as fatal.
   A change to what a refused or absent server returns must keep that path in step.
@@ -337,9 +368,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   the free can land on that address and take the old child's exit, which closed the pane (measured: the
   event carried the old shell's run time). The same call spawns a pane the deck does not lay out, since
   libghostty creates a surface for a view outside any window. The reply waits up to 10 s for a new
-  leader pid read per daemon from the kernel (`ZmxDaemonForeground.leaderPID` on the Mac, `ProcDaemon` by argv and
-  `ZMX_DIR` on agterm-server, where a socket's peer pid names the process that called `listen`), never `zmx list`,
-  which waits on every daemon (#1055). Past that it answers unverified, and a follow keeps the pane's restart hold and
+  leader pid read per daemon from the kernel (the leader-scan bullet below, #1055). Past that it answers unverified, and a follow keeps the pane's restart hold and
   publishes the respawn once the shell shows up, within 60 s of the launch. Holds are counted, one per restart, so a
   refused retry releases only its own. A later restart's confirmed kill, the pane closing, a parent respawn
   (`primaryRespawns`) or, on the server, a recorded exit ends the follow without publishing; a confirmed pane is
@@ -348,7 +377,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   hold. agterm-server announces the respawn as soon as the new daemon is attachable, before `exec`, since a viewer's
   attach is what releases it; the Mac publishes after confirmation. A confirmed reply carries `result.restart` (`paneID`, `oldPid`, `newPid`); they are shell pids, the program
   reads back as `foreground`. With no `command` the host replays the pane's foreground program: the
-  argv `tree` reports, read through `ForegroundProcess.observed` from a fresh leader listing, filtered by
+  argv `tree` reports, read through `ForegroundProcess.observed` from a fresh leader scan, filtered by
   host-free `RestartReplay.resolve` and launched through `attachCommand(replaying:)`. It starts in that
   process's own working directory, never `session.cwd`: the shell-reported cwd can be stale before the
   first prompt. A process that IS the daemon leader and a shell is refused, to prevent replaying the
@@ -370,7 +399,15 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   also lands during app termination and before panes mount. A stale-socket or failed kill sends nothing.
   This is what a closed terminal does: `nohup`, `disown`ed and other background jobs are never signalled,
   and a foreground program that ignores hangups survives a close. Do not widen it to the shell's process
-  tree. `ProcessSweeper` is nil by default because a test's fake listing names real pids.
+  tree. `ProcessSweeper` is nil by default because a test's fake leaders name real pids.
+- Runtime leader reads never run `zmx list`, which probes daemons one at a time, so a few stalled ones time out
+  every pane's answer. The tree, companion duplicate, restart's old and new shell, and the foreground job of a pane
+  or session kill read `ZmxClient.sessionLeaderPIDs` on the Mac (each daemon socket's peer pid,
+  `ZmxDaemonForeground.leaders`) and `ServerPanes.daemonShells` on agterm-server (one `/proc` pass,
+  `ProcDaemon.leaders`, since a Linux socket's peer pid names the process that called `listen`), where `zmx.kill`'s
+  leader comes from it too. `zmx.list`, `zmx.tree`, prune, the reset and launch reap, the Mac's `zmx.kill` inventory
+  and the server's observer keep the listing, since they need client counts, unclaimed daemons and unreadable rows;
+  the reap, reset and server prune also hang up the foreground jobs of the leader pids that listing read.
 - `session.scratch` is a third login shell with on/off/toggle; in Live sessions mode it is the daemon
   `Session.ScratchDaemon` names, saved and restored hidden, claimed, reaped and reset like a pane's, and
   ended by its shell's exit or `--command`; a requested-Live fallback keeps it for the next Live launch. It spawns lazily, survives
@@ -493,7 +530,7 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   sessions): that Mac shows the page's asks in its own window.
 - `session.companion.duplicate` is its own wire command for the same older-app reason.
   `ControlServer.duplicateCompanion` plans every pane through `ForegroundProcess.replayObservation` and host-free
-  `DuplicateReplay` from one fresh leader listing before creating anything; `AppStore.duplicateAsCompanion` then
+  `DuplicateReplay` from one fresh leader scan before creating anything; `AppStore.duplicateAsCompanion` then
   stores each program as `initialCommand`/`splitInitialCommand`, so it runs as a `--command` pane does, ungated by
   restore mode. It stores them only after the copy and its split exist, rewriting the source's session id, pane ids
   and their zmx daemon names to the copy's: an argv carrying its own pane identity, as a codex started with
@@ -1084,6 +1121,13 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   The close is deferred one task because releasing the page clears the delegate WebKit is calling through.
   A session in an undoable close has no slot to find, so the page keeps the request and `apply` finishes
   it at the next mount.
+- An Esc a page leaves unhandled reaches `HtmlOverlayWebView.cancelOperation`, which never passes it up the chain
+  (#753, full screen) and reports it to `AppStore.closeViewerOnEscape`: only an `HtmlPageKind.isViewer` page on top of
+  a terminal session closes, since a web page owns Esc for its forms and a page row is its session. The reply is
+  asynchronous, so the close also requires the web view to still be its window's first responder. AppKit sends ⌘. as
+  the same cancel, so `text.js`'s layers take both chords. A viewer drops a repeated cancel before WebKit (Esc in
+  `keyDown`, ⌘. in `performKeyEquivalent`), because a flag read at `cancelOperation` would describe a later event.
+  Once the page closes, later repeats reach whatever takes focus. It is a gesture over `overlay.close` with no control twin.
 - A synthetic `a.click()` reaches the policy exactly like a real click (`.linkActivated`, button 0, no
   flags), so every hand-off the page starts goes through `HtmlBrowser.confirm`, a nonblocking sheet with
   Cancel as default; nothing in control dispatch waits on it. One pending prompt per page, a decline silences the
@@ -2156,8 +2200,12 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
 - The runner is async behind an injected seam. `ControlActions` is `@MainActor`, so a blocking wait would
   freeze the UI for the whole network deadline, and the fake is what lets the end-to-end tests run without
   a second Mac.
-- Commands leave the accept thread in two ways. `zmx.tree`, `zmx.attach` and `zmx.attach.group` wait on the network,
+- Commands leave the accept thread in two ways. One main-actor entry, `inlineDisposition`, decides first: a remote
+  window's route is captured there, against the state the request arrived to, and sent from a worker; then
+  `zmx.tree`, `zmx.attach`, `zmx.attach.group` and the rest of `waitsOnNetwork` wait on the network,
   so `handleConnection` moves each to a worker thread and that thread's descriptor close moves with it.
+  When no route is prepared and the command waits on the network, its worker starts dispatch later.
+  Dispatch resolves the target it executes on the main actor.
   `zmx.present`, `session.overlay.job.run` and `session.overlay.page.serve` are streaming hand-offs: each is
   dispatched inline, its
   ordinary reply is written, and on ok the descriptor passes to a `ControlStreamOwner` whose reader thread
@@ -2220,7 +2268,8 @@ side, and reads `lastAppliedIsDark` when bare. Refuse it outside XCUITest; provi
   origin had reported a role or the attach it replaced dropped before its first report, and
   `remotePaneResumed`. Re-running the attach in the shell was rejected: it
   would claim the lead on every retry and skip that cleanup. A key on a waiting pane retries now; Command
-  chords pass. `RemoteLinkObserver` calls `ControlServer.retryRemoteLinksNow` on the display wake
+  chords pass. A click on the reconnecting panel, or on a lead cover still up over a waiting pane, retries too
+  (`PaneLead.coverClicked`, `noticeClicked`) and never claims; a dashboard cell's panel takes no clicks. `RemoteLinkObserver` calls `ControlServer.retryRemoteLinksNow` on the display wake
   `SystemWakeObserver` bridges, which a dark wake or a headless Mac never posts, and on every
   `NWPathMonitor` path change that leaves the path usable, a hand-off that stayed usable included;
   the first path report is the state at start. That makes

@@ -33,7 +33,16 @@ final class ControlServer {
     let resolver: ControlTargetResolver
 
     /// The accept loop that owns the listening socket, nil when not listening. `start()` is idempotent on this.
-    private var listener: ControlAcceptLoop?
+    private var listener: ControlAcceptLoop? {
+        didSet { holdNapActivity(listener != nil) }
+    }
+
+    /// Keeps App Nap off while the socket is bound: a napped app runs at priority 4, and under CPU load
+    /// its threads wait seconds for a core, so every caller, agent hooks included, times out.
+    private var napActivity: NSObjectProtocol?
+
+    /// holdsNapActivity reports whether the App Nap opt-out is held, true exactly while the socket is bound.
+    var holdsNapActivity: Bool { napActivity != nil }
 
     /// The held ownership lock fd, or -1 when this process does not own `socketPath`.
     private var lockFD: Int32 = -1
@@ -434,6 +443,18 @@ final class ControlServer {
         unlink(socketPath)
     }
 
+    private func holdNapActivity(_ hold: Bool) {
+        if hold, napActivity == nil {
+            napActivity = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiatedAllowingIdleSystemSleep, reason: "control socket serves agterm clients")
+            return
+        }
+        if !hold, let activity = napActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            napActivity = nil
+        }
+    }
+
     /// Take the exclusive advisory lock that marks this process the owner of `socketPath`, held from init
     /// until `stop()`, and set `refused` when another live instance holds it.
     ///
@@ -611,13 +632,13 @@ final class ControlServer {
             return
         }
 
-        // a remote window's structural command is decided here and sent from a worker, so the accept thread
-        // never waits on ssh while local structural commands keep their inline order
-        if let route = runBlocking({ await server.remoteRoute(request) }) {
-            if case .refused = route {
-                _ = server.responseWriter(conn, runBlocking { await server.runRemoteRoute(route) })
-                return
-            }
+        // one main-actor entry, blocking this background thread. dispatch refreshes the window cache in that same
+        // execution, so the fast path sees this command's mutations without a second, stallable hop.
+        let response: ControlResponse
+        switch runBlocking({ await server.inlineDisposition(request) }) {
+        case .reply(let reply):
+            response = reply
+        case .remote(let route):
             handedOff = true
             let work: @Sendable () -> Void = {
                 defer { close(conn) }
@@ -625,11 +646,7 @@ final class ControlServer {
             }
             Self.startWorker("com.umputun.agterm.control.remote", work)
             return
-        }
-
-        // `zmx tree <this machine>` would otherwise deadlock against itself: the far side's own agtermctl
-        // waits in this server's backlog while this connection holds the only accept thread.
-        if Self.waitsOnNetwork(request.cmd) {
+        case .network:
             handedOff = true
             let work: @Sendable () -> Void = {
                 defer { close(conn) }
@@ -638,10 +655,6 @@ final class ControlServer {
             Self.startWorker("com.umputun.agterm.control.remote", work)
             return
         }
-
-        // hop to the main actor, blocking this background thread. dispatch refreshes the window cache in that
-        // same execution, so the fast path sees this command's mutations without a second, stallable hop.
-        let response = runBlocking { await server.dispatch(request) }
         let written = server.responseWriter(conn, response)
         // the quit after a confirmed reset waits for THIS reply to be on the wire, decided from this request
         // and this response so a remote worker finishing another reply in parallel can never trigger it
@@ -729,6 +742,28 @@ final class ControlServer {
     /// A minimal mutable box to ferry the async result back across the semaphore.
     private final class ResultBox<T>: @unchecked Sendable {
         var value: T?
+    }
+
+    /// Where the accept thread's single main-actor entry sends a request.
+    private enum InlineDisposition: Sendable {
+        case reply(ControlResponse)
+        /// a remote window's route, captured now and sent from a worker so the accept thread never waits on ssh
+        case remote(RemoteRoute)
+        /// dispatched from a worker: `zmx tree <this machine>` would otherwise deadlock, the far side's own
+        /// agtermctl waiting in this server's backlog while this connection holds the only accept thread
+        case network
+    }
+
+    /// inlineDisposition decides the remote route before anything else, so a route is captured against the state
+    /// this request arrived to. A request that neither routes nor waits on the network is dispatched in that same entry;
+    /// for a network one its worker starts dispatch later, and dispatch resolves the target it executes on.
+    private func inlineDisposition(_ request: ControlRequest) async -> InlineDisposition {
+        if let route = remoteRoute(request) {
+            if case .refused(let response) = route { return .reply(response) }
+            return .remote(route)
+        }
+        if Self.waitsOnNetwork(request.cmd) { return .network }
+        return .reply(await dispatch(request))
     }
 
     // MARK: - Dispatch

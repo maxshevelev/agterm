@@ -138,6 +138,24 @@ class HtmlPageTestCase: XCTestCase {
         _ = try await inRenderer("window.dispatchEvent(new KeyboardEvent('keydown', { key: \(try json(key)) })); true", view)
     }
 
+    func sendEscape(to window: NSWindow, repeating: Bool = false) throws {
+        try sendKey("\u{1b}", keyCode: 53, to: window, repeating: repeating)
+    }
+
+    func sendKey(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], to window: NSWindow,
+                 repeating: Bool = false) throws {
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = try XCTUnwrap(NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: repeating && type == .keyDown, keyCode: keyCode))
+            // NSApplication offers a ⌘ chord as a key equivalent before the window dispatches it, and on macOS 26
+            // NSWindow.sendEvent turns an unclaimed ⌘. straight into cancelOperation: without a keyDown
+            if type == .keyDown, modifiers.contains(.command), window.performKeyEquivalent(with: event) { continue }
+            window.sendEvent(event)
+        }
+    }
+
     func shown(_ overlay: HtmlOverlay) throws -> (HtmlOverlayPage, NSWindow) {
         let page = registry.page(for: overlay, store: store)
         return (page, try host(page.webView))

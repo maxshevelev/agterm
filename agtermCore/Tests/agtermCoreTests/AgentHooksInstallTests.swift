@@ -297,6 +297,66 @@ struct AgentHooksInstallTests {
         #expect(events(result.json).count == 5)
     }
 
+    private func timeout(_ entry: [String: Any]) -> Int? {
+        (entry["hooks"] as? [[String: Any]])?.first?["timeout"] as? Int
+    }
+
+    private func untimedAdapterSettings(stopExtra: String = "") -> String {
+        let adapter = AgentHooksInstall.claudeWrapperPath(scriptDir: scriptDir)
+        return """
+        {
+          "hooks": {
+            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "'\(adapter)' active --blink"}]}],
+            "PostToolUse": [{"hooks": [{"type": "command", "command": "'\(adapter)' active --blink"}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": "'\(adapter)' completed --auto-reset"\(stopExtra)}]}],
+            "PermissionRequest": [{"hooks": [{"type": "command", "command": "'\(adapter)' blocked"}]}],
+            "Notification": [{"matcher": "permission_prompt", "hooks": [{"type": "command", "command": "'\(adapter)' blocked"}]}]
+          }
+        }
+        """
+    }
+
+    @Test func mergeGivesEveryGeneratedEntryTheStatusHookTimeout() throws {
+        let result = try AgentHooksInstall.mergeClaudeSettings(existing: nil, scriptDir: scriptDir)
+        let evts = events(result.json)
+        #expect(evts.count == 5)
+        for (event, entries) in evts {
+            #expect(entries.map(timeout) == [AgentHooksInstall.statusHookTimeout], "\(event)")
+        }
+    }
+
+    @Test func mergeAddsTheTimeoutToAnInstallThatPredatesIt() throws {
+        let first = try AgentHooksInstall.mergeClaudeSettings(existing: untimedAdapterSettings(), scriptDir: scriptDir)
+        #expect(first.changed)
+        let evts = events(first.json)
+        #expect(evts.values.allSatisfy { $0.count == 1 }, "the timeout is added in place, not as a second entry")
+        for (event, entries) in evts {
+            #expect(entries.map(timeout) == [AgentHooksInstall.statusHookTimeout], "\(event)")
+        }
+        #expect(evts["Notification"]?.first?["matcher"] as? String == "permission_prompt")
+
+        let second = try AgentHooksInstall.mergeClaudeSettings(existing: first.json, scriptDir: scriptDir)
+        #expect(!second.changed)
+    }
+
+    @Test func mergeKeepsATimeoutTheUserSet() throws {
+        let result = try AgentHooksInstall.mergeClaudeSettings(existing: untimedAdapterSettings(stopExtra: #", "timeout": 30"#),
+                                                               scriptDir: scriptDir)
+        let evts = events(result.json)
+        #expect(evts["Stop"]?.map(timeout) == [30])
+        #expect(evts["PostToolUse"]?.map(timeout) == [AgentHooksInstall.statusHookTimeout])
+    }
+
+    @Test func mergeLeavesAUserHookWithoutATimeout() throws {
+        let result = try AgentHooksInstall.mergeClaudeSettings(existing: legacySettings(extraUserHook: "/usr/bin/other.sh"),
+                                                               scriptDir: scriptDir)
+        let prompt = events(result.json)["UserPromptSubmit"] ?? []
+        let user = prompt.first { command($0) == "/usr/bin/other.sh" }
+        #expect(user != nil)
+        #expect(user.flatMap(timeout) == nil)
+        #expect(prompt.compactMap(timeout) == [AgentHooksInstall.statusHookTimeout], "the migrated entry gets the timeout")
+    }
+
     @Test func mergeHandlesEmptyExisting() throws {
         let result = try AgentHooksInstall.mergeClaudeSettings(existing: "", scriptDir: scriptDir)
         #expect(result.changed)
@@ -310,6 +370,13 @@ struct AgentHooksInstallTests {
             #expect(block.contains("[[hooks.\(event).hooks]]"))
         }
         #expect(block.contains("type = \"command\""))
+    }
+
+    @Test func codexHooksBlockBoundsEveryHook() {
+        let block = AgentHooksInstall.codexHooksBlock(scriptDir: scriptDir)
+        let lines = block.components(separatedBy: "\n")
+        #expect(lines.filter { $0 == "timeout = \(AgentHooksInstall.statusHookTimeout)" }.count == 6)
+        #expect(lines.filter { $0.hasPrefix("command = ") }.count == 6)
     }
 
     @Test func codexHooksBlockMapsActionsAndBakesWrapperPath() {
@@ -727,5 +794,215 @@ struct AgentHooksInstallTests {
         #expect(lines.filter { $0.contains("command -v agtermctl") }.count == 1)
         #expect(!moved.contains("/Volumes/agterm"))
         #expect(moved == AgentHooksInstall.bakeAgtermctlPath(into: wrapperStub, toolPath: "/Applications/agterm.app/Contents/MacOS/agtermctl"))
+    }
+
+    private static let agyChatBlock = """
+      "chat": {
+        "Stop": [{"type": "command", "command": "~/.gemini/config/skills/chat/scripts/chat.py agy-hook", "timeout": 10}]
+      }
+    """
+
+    private static let agyCookbookBlock = """
+      "agterm-status": {
+        "PreInvocation": [{"type": "command", "command": "\\"$HOME/.config/agterm/hooks/agy/agy-status-hook.sh\\" invocation", "timeout": 5}],
+        "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "\\"$HOME/.config/agterm/hooks/agy/agy-status-hook.sh\\" tool-done"}]}]
+      }
+    """
+
+    private func agyMerged(_ existing: String?) throws -> String {
+        guard case .merged(let contents) = AgentHooksInstall.Agy.mergeHooks(existing: existing, scriptDir: scriptDir) else {
+            Issue.record("expected a merge")
+            return ""
+        }
+        return contents
+    }
+
+    @Test func agyMergeWhenAbsentWritesTheNamedHook() throws {
+        let contents = try agyMerged(nil)
+        let block = object(contents)["agterm-status"] as? [String: Any] ?? [:]
+        #expect(Set(block.keys) == ["PreInvocation", "PreToolUse", "Stop"])
+        let tool = (block["PreToolUse"] as? [[String: Any]])?.first
+        #expect(tool?["matcher"] as? String == "ask_question|ask_permission")
+        #expect(command(tool ?? [:]) == "'\(scriptDir)/agterm-agy-status.sh' ask")
+        #expect((block["Stop"] as? [[String: Any]])?.first?["command"] as? String == "'\(scriptDir)/agterm-agy-status.sh' stop")
+        #expect(!contents.contains("\\/"))
+    }
+
+    @Test func agyMergeReplacesTheCookbookBlockAndKeepsOtherHooks() throws {
+        let existing = "{\n" + Self.agyChatBlock + ",\n" + Self.agyCookbookBlock + "\n}\n"
+        let contents = try agyMerged(existing)
+        let root = object(contents)
+        #expect(NSDictionary(dictionary: root["chat"] as? [String: Any] ?? [:]).isEqual(object(existing)["chat"]))
+        #expect(!contents.contains("agy-status-hook.sh"))
+        #expect(contents.contains("agterm-agy-status.sh"))
+    }
+
+    @Test func agyMergeOfItsOwnOutputChangesNothing() throws {
+        let contents = try agyMerged("{\n" + Self.agyChatBlock + "\n}\n")
+        #expect(AgentHooksInstall.Agy.mergeHooks(existing: contents, scriptDir: scriptDir) == .unchanged)
+    }
+
+    @Test func agyMergeRewritesAnOwnBlockForAnotherScriptDirectory() throws {
+        let contents = try agyMerged(nil)
+        let moved = AgentHooksInstall.Agy.mergeHooks(existing: contents, scriptDir: "/Users/other/.config/agterm/agent-status")
+        guard case .merged(let rewritten) = moved else {
+            Issue.record("expected a merge")
+            return
+        }
+        #expect(rewritten.contains("/Users/other/.config/agterm/agent-status/agterm-agy-status.sh"))
+    }
+
+    @Test(arguments: [
+        #"{"agterm-status": {"Stop": [{"type": "command", "command": "/usr/local/bin/my-status stop"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "agy-status-hook.sh stop"}, {"command": "notify-send done"}]}}"#,
+        #"{"agterm-status": {}}"#,
+        #"{"agterm-status": "off"}"#,
+        #"{"agterm-status": {"enabled": false, "Stop": [{"command": "'/x/agterm-agy-status.sh' stop"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "'/x/agterm-agy-status.sh' stop"}, {"type": "http", "url": "https://x"}]}}"#,
+        #"{"agterm-status": {"PreToolUse": [{"matcher": "x", "hooks": "agterm-agy-status.sh"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "\"$HOME/.config/agterm/hooks/agy/agy-status-hook.sh\" stop; terminal-notifier -message done"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "'/x/agterm-agy-status.sh' stop && say done"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "$(cat /x)/agterm-agy-status.sh stop"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "/x/agterm-agy-status.sh finish"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "AGTERM_AGY_IGNORE_BACKGROUND=1 /x/agterm-agy-status.sh stop"}]}}"#,
+        #"{"agterm-status": {"Stop": [{"command": "timeout 2 /x/agy-status-hook.sh stop"}]}}"#,
+    ])
+    func agyMergeLeavesAForeignNamedHookAlone(_ existing: String) {
+        #expect(AgentHooksInstall.Agy.mergeHooks(existing: existing, scriptDir: scriptDir) == .userOwned)
+    }
+
+    @Test(arguments: [
+        #""$HOME/.config/agterm/hooks/agy/agy-status-hook.sh" tool-done"#,
+        "'/Users/me/my dir/agterm-agy-status.sh' ask",
+        "/opt/agterm/agterm-agy-status.sh invocation",
+    ])
+    func agyAdapterCommandAcceptsEachQuoting(_ command: String) {
+        #expect(AgentHooksInstall.Agy.isAdapterCommand(command))
+    }
+
+    @Test(arguments: ["not json", "[1, 2]"])
+    func agyMergeRefusesAFileThatIsNotAJSONObject(_ existing: String) {
+        #expect(AgentHooksInstall.Agy.mergeHooks(existing: existing, scriptDir: scriptDir) == .unparseable)
+    }
+
+    // the cookbook recipe's hooks file as published (copilot-agent-status, agterm 0.7.1)
+    static let copilotCookbookFile = """
+    {
+      "version": 1,
+      "hooks": {
+        "userPromptSubmitted": [
+          {"type": "command", "bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh active --blink", "timeoutSec": 5}
+        ],
+        "postToolUse": [
+          {"type": "command", "bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh active --blink", "timeoutSec": 5}
+        ],
+        "agentStop": [
+          {"type": "command", "bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh completed --auto-reset", "timeoutSec": 5}
+        ],
+        "notification": [
+          {"matcher": "permission_prompt", "type": "command", "bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh blocked", "timeoutSec": 5}
+        ]
+      }
+    }
+    """
+
+    private func copilotMerged(_ existing: String?) -> String {
+        guard case .merged(let contents) = AgentHooksInstall.Copilot.mergeHooks(existing: existing, scriptDir: scriptDir) else {
+            Issue.record("expected a merge")
+            return ""
+        }
+        return contents
+    }
+
+    @Test func copilotMergeWhenAbsentWritesEveryEvent() {
+        let contents = copilotMerged(nil)
+        let root = object(contents)
+        #expect(contents.contains("\"version\" : 1"))
+        let hooks = root["hooks"] as? [String: Any] ?? [:]
+        #expect(Set(hooks.keys) == ["userPromptSubmitted", "postToolUse", "postToolUseFailure", "notification", "agentStop",
+                                    "sessionEnd"])
+        let notification = (hooks["notification"] as? [[String: Any]])?.first
+        #expect(notification?["matcher"] as? String == "permission_prompt")
+        #expect(notification?["bash"] as? String == "'\(scriptDir)/agterm-copilot-status.sh' ask")
+        #expect((hooks["sessionEnd"] as? [[String: Any]])?.first?["bash"] as? String == "'\(scriptDir)/agterm-copilot-status.sh' end")
+        #expect(!contents.contains("\\/"))
+    }
+
+    @Test func copilotMergeOfItsOwnOutputChangesNothing() {
+        let contents = copilotMerged(nil)
+        #expect(AgentHooksInstall.Copilot.mergeHooks(existing: contents, scriptDir: scriptDir) == .unchanged)
+    }
+
+    @Test(arguments: ["", " \n"])
+    func copilotMergeTreatsABlankFileAsAbsent(_ existing: String) {
+        #expect(copilotMerged(existing) == copilotMerged(nil))
+    }
+
+    @Test func copilotMergeRewritesAnOwnFileForAnotherScriptDirectory() {
+        let moved = AgentHooksInstall.Copilot.mergeHooks(existing: copilotMerged(nil), scriptDir: "/Users/other/.config/agterm/agent-status")
+        guard case .merged(let rewritten) = moved else {
+            Issue.record("expected a merge")
+            return
+        }
+        #expect(rewritten.contains("/Users/other/.config/agterm/agent-status/agterm-copilot-status.sh"))
+    }
+
+    @Test(arguments: [
+        #"{"version": 1, "hooks": {"agentStop": [{"type": "command", "bash": "/usr/local/bin/my-status stop"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop"}, {"bash": "say done"}]}}"#,
+        #"{"version": 1, "hooks": {}}"#,
+        #"{"version": 1, "disableAllHooks": true, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop", "env": {"A": "1"}}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop", "command": "say done"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"type": "http", "url": "https://x"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop && say done"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "/x/agterm-copilot-status.sh finish"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": "'/x/agterm-copilot-status.sh' stop"}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "'/x/agterm-copilot-status.sh' stop"}], "sessionEnd": []}}"#,
+    ])
+    func copilotMergeLeavesAForeignFileAlone(_ existing: String) {
+        #expect(AgentHooksInstall.Copilot.mergeHooks(existing: existing, scriptDir: scriptDir) == .userOwned)
+    }
+
+    @Test(arguments: ["not json", "[1, 2]"])
+    func copilotMergeRefusesAFileThatIsNotAJSONObject(_ existing: String) {
+        #expect(AgentHooksInstall.Copilot.mergeHooks(existing: existing, scriptDir: scriptDir) == .unparseable)
+    }
+
+    @Test(arguments: [
+        (nil, "/w", nil), ("", "/w", nil), ("/opt/copilot/", "/w", "/opt/copilot"), ("cfg/../copilot", "/w", "/w/copilot"),
+        ("copilot", "relative", nil),
+    ] as [(String?, String, String?)])
+    func copilotHomeResolvesLikeCodexHome(_ value: String?, _ workingDirectory: String, _ expected: String?) {
+        #expect(AgentHooksInstall.Copilot.home(copilotHome: value, workingDirectory: workingDirectory) == expected)
+    }
+
+    @Test func copilotCookbookRecipeFileIsRecognized() {
+        #expect(AgentHooksInstall.Copilot.isCookbookFile(Self.copilotCookbookFile))
+    }
+
+    @Test(arguments: [
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh completed --auto-reset; say done"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "$HOME/.config/agterm/agent-status/agterm-agent-status.sh completed --sound Glass"}]}}"#,
+        #"{"version": 1, "hooks": {"agentStop": [{"bash": "/opt/agterm-agent-status.sh completed --auto-reset"}]}}"#,
+        #"{"version": 1, "hooks": {}}"#,
+        "not json",
+    ])
+    func copilotChangedCookbookFileIsNotRecognized(_ text: String) {
+        #expect(!AgentHooksInstall.Copilot.isCookbookFile(text))
+    }
+
+    @Test(arguments: [
+        ("\"timeoutSec\": 5", "\"timeoutSec\": 10"),
+        ("\"permission_prompt\"", "\"permission_prompt|elicitation_dialog\""),
+        ("\"agentStop\"", "\"subagentStop\""),
+    ])
+    func copilotAdjustedCookbookRecipeIsNotRecognized(_ change: (String, String)) throws {
+        let recipe = Self.copilotCookbookFile
+        guard let range = recipe.range(of: change.0) else {
+            Issue.record("the recipe has no \(change.0)")
+            return
+        }
+        #expect(!AgentHooksInstall.Copilot.isCookbookFile(recipe.replacingCharacters(in: range, with: change.1)))
     }
 }

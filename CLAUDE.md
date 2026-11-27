@@ -189,6 +189,9 @@ C-boundary concurrency before changing the bridge.
 - Debug Swift code lives in `agterm.debug.dylib`; inspect it or object files, not the stub executable.
 - For throwaway launch-time probes, append to a temp file. `NSLog` from `open -n` is unreliable; production
   logging uses `os.Logger`.
+- An instance whose control socket is bound never enters App Nap: `ControlServer` holds a
+  `userInitiatedAllowingIdleSystemSleep` activity for exactly that time (`control-api.md`).
+  An instance not serving its socket (refused, or its bind failed) can still nap, about 70 to 95 s after it is hidden.
 - `scripts/run.sh` activates an existing instance instead of loading a rebuild. Use a distinct isolated
   launch for current code.
 - Stop an isolated Live-mode Debug instance and its daemons before rebuilding the same DerivedData.
@@ -383,9 +386,10 @@ C-boundary concurrency before changing the bridge.
 - Browsers cache `style.css` for 4 hours, so a page change that depends on a `style.css` change bumps the
   `?v=` on its `<link>` in every page, or cached visitors get new HTML with old CSS.
 - Hero images must match the fixed `1187 / 696` ratio, about 1.70:1; capture dense dashboards at that
-  ratio before WebP conversion; existing shots are 2374x1392. Dashboard images may floor near 200k versus
-  85-172k for single-window shots. Crossfade duration is slides times 5 seconds, delays advance by
-  5 seconds, and the opaque keyframe plateau is about `1/slides`.
+  ratio before WebP conversion; existing shots are 2374x1392. Dense shots (dashboard, agent pair) run
+  230-305k at WebP quality 70, single-window shots 90-205k at 82.
+  The index page's `#shots` grid is the one ordered list of full-window shots: its script pages the grid
+  and rotates the hero through the same figures, so a shot is added or reordered there alone.
 - Auto-fit feature grids can strand orphan cards. Use a fixed column count, explicit spans, and narrow
   media fallbacks as in `.surfaces-grid`.
 - Demo and screenshot staging shows two or three agent statuses at most, and never notification badges
@@ -394,6 +398,12 @@ C-boundary concurrency before changing the bridge.
   on agterm itself with nothing private in it. A feature that serves agents is shown with real agents on agterm,
   other sessions with made-up output; never another project's content, private folder or host names.
   Start codex with `--no-daemon`: a bare `codex` runs its hooks in the background service, which reports no status.
+- Site and README shots are staged by `agtermUITests/ScreenshotUITests` and captured with
+  `scripts/screenshots.sh [method...]` into `build/screenshots`; the script sets
+  `TEST_RUNNER_AGTERM_SCREENSHOTS=1`, without which the suite skips, and takes over the screen and
+  keyboard. Retake a shot by rerunning its scene.
+  A WKWebView's AX frame can span the whole document, so a scene positions its target relative to
+  `app.windows.firstMatch.frame`; a scroll loop bounded by the web view's own frame can scroll past it.
 
 ## Path-scoped rules
 

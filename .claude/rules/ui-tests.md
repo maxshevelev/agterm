@@ -11,6 +11,8 @@ These run inside the app, so a mistake can kill the host instead of failing an a
 - The run draws nothing on screen. `HostedWindowHider`, the test bundle's principal class, makes every
   window created after bundle load start at `alphaValue` 0; the launch window predates it and is covered
   by `HostedTestPlaceholder`. Windows stay ordered in and key-eligible, so `isVisible` assertions hold.
+  `isKeyWindow` still reads false after `makeKeyAndOrderFront`, since the host never activates the app, while
+  `firstResponder` tracks; a key-window gate cannot be exercised there.
   A test that needs an opaque window sets `alphaValue` itself. View captures (`cacheDisplay`,
   `ImageRenderer`, `WKWebView.takeSnapshot`) are unaffected; a screen-composite capture would be blank.
   A popped-up `NSMenu` is a window-server surface outside `NSApp.windows`, so the hook cannot reach it.
@@ -33,6 +35,15 @@ These run inside the app, so a mistake can kill the host instead of failing an a
   fails on his machine alone while CI stays green. `defaults read -g NSUserKeyEquivalents` names the
   bindings. Suppress the substitution rather than renaming fixtures: `StockMenuChordTests` needs the
   real "Close" to test chord ownership, and the substitution matches invented titles just as readily.
+- In a hosted `NSHostingView`, neither `NSWindow.sendEvent` nor a direct `mouseDown`/`mouseUp` on the
+  hit-tested view fired `onTapGesture`, not even on a plain `Color` (2026-11-23).
+  Pin the gesture's action in a hosted test; check pointer delivery in `agtermUITests`,
+  or in an isolated Debug instance when it needs a live fixture.
+- `NSWindow.sendEvent` skips the key-equivalent pass `NSApplication` runs first, and on macOS 26 it turns an
+  unclaimed `⌘.` straight into `cancelOperation:` with no `keyDown`; macOS 27 still sends it to `keyDown`.
+  A hosted test sending a ⌘ chord offers it to `window.performKeyEquivalent` first, as
+  `HtmlPageTestCase.sendKey` does. Owner PRs skip the hosted job, so a hosted test that fails only on CI's
+  macOS 26 first fails on the master push; a throwaway branch with a push-triggered workflow runs it there first.
 - Never stub `GhosttyApp`; its handler is the only crash record.
 - `AGTERM_HOSTED_TESTS=1`, set by the `agtermTests` scheme, renders `HostedTestPlaceholder`, skips the
   launch `NSApp.activate()`, and skips the scene task that assigns `appDelegate.library`; it stays nil.
@@ -47,9 +58,10 @@ These run inside the app, so a mistake can kill the host instead of failing an a
 
 - `agtermUITests/` launches the real app and drives UI behavior unavailable to host-free tests.
   Run with `xcodebuild test -project agterm.xcodeproj -scheme agterm -destination 'platform=macOS'`.
-- Default UI-test launches bypass live-session wrapping through the existing UI-test sentinel. Only the
-  focused zmx persistence test sets `AGTERM_UITEST_ENABLE_ZMX=1`; it must kill its exact test daemons in
-  teardown so they cannot leak into later tests.
+- Default UI-test launches bypass live-session wrapping through the existing UI-test sentinel. Only
+  `ZmxLiveUITests` and `ScreenshotUITests` opt in (`enablesZmxForUITest`, which sets
+  `AGTERM_UITEST_ENABLE_ZMX=1`); each kills its exact test daemons in teardown through the shared
+  `reapTestDaemons` in `agtermUITests/ZmxTestDaemons.swift`, so none leak into later tests.
 - Pass a temporary `AGTERM_STATE_DIR` in the launch environment; `agtermApp.restoredStore()` honors it.
   Verify the native `Open Directory...` panel manually.
 - **Use `app.launchForUITest()`, never `app.launch()`.** FB11763863 on macOS 15+/Xcode 16+, including

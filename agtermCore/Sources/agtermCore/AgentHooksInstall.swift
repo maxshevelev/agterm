@@ -96,6 +96,209 @@ public enum AgentHooksInstall {
         }
     }
 
+    /// Antigravity CLI (`agy`) hooks: one named hook in `~/.gemini/config/hooks.json`, whose events the adapter maps.
+    enum Agy {
+        /// The adapter every generated command invokes.
+        static let wrapperName = "agterm-agy-status.sh"
+        /// The named hook this installer owns in `hooks.json`.
+        static let hookName = "agterm-status"
+        /// The cookbook recipe's adapter, whose block under the same name an install replaces in place.
+        static let cookbookAdapterName = "agy-status-hook.sh"
+        /// The actions the adapter, or the cookbook's, takes as its one argument.
+        static let actions: Set<String> = ["invocation", "ask", "tool-done", "stop"]
+
+        /// The outcome of merging the named hook into an existing `hooks.json`.
+        enum MergeOutcome: Equatable {
+            case merged(contents: String)
+            case unchanged
+            /// The named hook carries a handler that is neither ours nor the cookbook's.
+            case userOwned
+            case unparseable
+        }
+
+        /// The config directory agy reads, fixed beneath the home.
+        static func configDirectory(home: String) -> String {
+            home + "/.gemini/config"
+        }
+
+        /// The named hook's value: PreInvocation is the turn's work (and the answer after a question), PreToolUse on
+        /// a prompt tool its prompt, Stop its end.
+        static func hookBlock(scriptDir: String) -> [String: Any] {
+            let wrapper = shellQuote(scriptDir + "/" + wrapperName)
+            func handler(_ action: String) -> [String: Any] {
+                ["type": "command", "command": wrapper + " " + action, "timeout": AgentHooksInstall.statusHookTimeout]
+            }
+            return [
+                "PreInvocation": [handler("invocation")],
+                "PreToolUse": [["matcher": "ask_question|ask_permission", "hooks": [handler("ask")]]],
+                "Stop": [handler("stop")],
+            ]
+        }
+
+        /// merge the named hook into `existing` (nil or blank = no file yet), preserving every other named hook.
+        /// An existing block is replaced only when every command it holds is our adapter's or the cookbook's.
+        static func mergeHooks(existing: String?, scriptDir: String) -> MergeOutcome {
+            guard var root = try? parsedObject(existing) else { return .unparseable }
+            let block = hookBlock(scriptDir: scriptDir)
+            if let current = root[hookName] {
+                if serialize([hookName: current]) == serialize([hookName: block]) { return .unchanged }
+                let commands = (current as? [String: Any]).flatMap(handlerCommands) ?? []
+                guard !commands.isEmpty, commands.allSatisfy(isAdapterCommand) else { return .userOwned }
+            }
+            root[hookName] = block
+            return .merged(contents: serialize(root, escapingSlashes: false))
+        }
+
+        static func isAdapterCommand(_ command: String) -> Bool {
+            AgentHooksInstall.isAdapterCommand(command, names: [wrapperName, cookbookAdapterName], actions: actions)
+        }
+
+        // every handler's command in a named hook, flat events and matcher groups alike; nil for any other key or a
+        // handler without a command, such as `"enabled": false`, so a block we did not generate reads as foreign
+        private static func handlerCommands(_ block: [String: Any]) -> [String]? {
+            var commands: [String] = []
+            for value in block.values {
+                guard let entries = value as? [[String: Any]] else { return nil }
+                for entry in entries {
+                    let handlers = entry["hooks"].map { $0 as? [[String: Any]] } ?? [entry]
+                    guard let handlers else { return nil }
+                    for handler in handlers {
+                        guard let command = handler["command"] as? String else { return nil }
+                        commands.append(command)
+                    }
+                }
+            }
+            return commands
+        }
+    }
+
+    /// isAdapterCommand accepts only a path named in `names`, bare or wrapped in one pair of quotes, followed by one of
+    /// `actions`, so a command with anything chained onto it is the user's.
+    static func isAdapterCommand(_ command: String, names: Set<String>, actions: Set<String>) -> Bool {
+        guard let space = command.lastIndex(of: " "), actions.contains(String(command[command.index(after: space)...])) else {
+            return false
+        }
+        var path = Substring(command[..<space])
+        var rejected = "'\";|&`<>()\n \t"
+        if let quote = path.first, quote == "'" || quote == "\"", path.count > 1, path.last == quote {
+            path = path.dropFirst().dropLast()
+            rejected.removeLast(2)
+        }
+        guard !path.contains(where: { rejected.contains($0) }) else { return false }
+        return path.split(separator: "/").last.map { names.contains(String($0)) } ?? false
+    }
+
+    /// GitHub Copilot CLI hooks: one agterm-owned file among the `*.json` files Copilot loads from its `hooks`
+    /// directory, whose events the adapter maps.
+    public enum Copilot {
+        /// The adapter every generated command invokes.
+        static let wrapperName = "agterm-copilot-status.sh"
+        /// The hooks file this installer owns.
+        static let fileName = "agterm-status.json"
+        /// The cookbook recipe's hooks file, removed by an install while it is the recipe exactly as published.
+        static let cookbookFileName = "copilot-status-hooks.json"
+        /// The actions the adapter takes as its one argument.
+        static let actions: Set<String> = ["work", "ask", "stop", "end"]
+
+        private static let handlerKeys: Set<String> = ["type", "bash", "command", "timeoutSec", "matcher"]
+
+        /// The outcome of writing the hooks file over an existing one.
+        enum MergeOutcome: Equatable {
+            case merged(contents: String)
+            case unchanged
+            /// The file holds a hook that is not our adapter's.
+            case userOwned
+            case unparseable
+        }
+
+        /// The config directory Copilot reads when `COPILOT_HOME` names none.
+        static func configDirectory(home: String) -> String {
+            home + "/.copilot"
+        }
+
+        /// home resolves a `COPILOT_HOME` value as `Codex.home` resolves `CODEX_HOME`, nil for the default `~/.copilot`.
+        public static func home(copilotHome: String?, workingDirectory: String) -> String? {
+            Codex.home(codexHome: copilotHome, workingDirectory: workingDirectory)
+        }
+
+        /// The hooks file: a prompt and every finished tool are work, a permission prompt blocked, the main
+        /// agent's stop completed, and the session's end idle unless a `-p` run completed.
+        static func hooksFile(scriptDir: String) -> [String: Any] {
+            let wrapper = shellQuote(scriptDir + "/" + wrapperName)
+            func handler(_ action: String, matcher: String? = nil) -> [[String: Any]] {
+                var entry: [String: Any] = ["type": "command", "bash": wrapper + " " + action, "timeoutSec": AgentHooksInstall.statusHookTimeout]
+                entry["matcher"] = matcher
+                return [entry]
+            }
+            return ["version": 1, "hooks": [
+                "userPromptSubmitted": handler("work"),
+                "postToolUse": handler("work"),
+                "postToolUseFailure": handler("work"),
+                "notification": handler("ask", matcher: "permission_prompt"),
+                "agentStop": handler("stop"),
+                "sessionEnd": handler("end"),
+            ]]
+        }
+
+        /// mergeHooks returns the hooks file to write over `existing` (nil or blank = no file yet), rewriting a file only
+        /// while every hook in it runs our adapter with one action.
+        static func mergeHooks(existing: String?, scriptDir: String) -> MergeOutcome {
+            let contents = serialize(hooksFile(scriptDir: scriptDir), escapingSlashes: false)
+            guard let existing, !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .merged(contents: contents)
+            }
+            guard let root = try? parsedObject(existing) else { return .unparseable }
+            if serialize(root, escapingSlashes: false) == contents { return .unchanged }
+            let isOurs: (String) -> Bool = { isAdapterCommand($0, names: [wrapperName], actions: actions) }
+            guard let commands = commands(in: root), !commands.isEmpty, commands.allSatisfy(isOurs) else { return .userOwned }
+            return .merged(contents: contents)
+        }
+
+        /// isCookbookFile is true when `text` is the cookbook recipe's hooks file as published, events, matcher and timeouts
+        /// included, so a recipe the user adjusted is never moved aside.
+        static func isCookbookFile(_ text: String) -> Bool {
+            guard let root = try? parsedObject(text) else { return false }
+            return serialize(root) == serialize(cookbookRecipe)
+        }
+
+        /// callsAgtermWrapper is true when `text` runs agterm's generic status wrapper or this adapter anywhere, so a file
+        /// holding it would post statuses beside the installed hooks.
+        static func callsAgtermWrapper(_ text: String) -> Bool {
+            text.contains(AgentHooksInstall.wrapperName) || text.contains(wrapperName)
+        }
+
+        private static var cookbookRecipe: [String: Any] {
+            func handler(_ arguments: String, matcher: String? = nil) -> [[String: Any]] {
+                var entry: [String: Any] = ["type": "command", "timeoutSec": 5,
+                                            "bash": "$HOME/.config/agterm/agent-status/" + AgentHooksInstall.wrapperName + " " + arguments]
+                entry["matcher"] = matcher
+                return [entry]
+            }
+            return ["version": 1, "hooks": [
+                "userPromptSubmitted": handler("active --blink"),
+                "postToolUse": handler("active --blink"),
+                "agentStop": handler("completed --auto-reset"),
+                "notification": handler("blocked", matcher: "permission_prompt"),
+            ]]
+        }
+
+        // every handler's command; nil for any shape we would not write, such as a top-level `disableAllHooks`, an `env`
+        // or `cwd` on a handler, a handler with no command, or an event the user emptied to switch it off
+        private static func commands(in root: [String: Any]) -> [String]? {
+            guard Set(root.keys).isSubset(of: ["version", "hooks"]), let hooks = root["hooks"] as? [String: Any] else { return nil }
+            var commands: [String] = []
+            for value in hooks.values {
+                guard let handlers = value as? [[String: Any]], !handlers.isEmpty else { return nil }
+                for handler in handlers {
+                    let lines = ["bash", "command"].compactMap { handler[$0] }
+                    guard Set(handler.keys).isSubset(of: handlerKeys), !lines.isEmpty, let lines = lines as? [String] else { return nil }
+                    commands += lines
+                }
+            }
+            return commands
+        }
+    }
+
     public enum Codex {
         /// home resolves a `CODEX_HOME` value to Codex's root, nil for the default `~/.codex`: unset, empty, or no
         /// absolute `workingDirectory`. A relative value joins `workingDirectory`, never expanded.
@@ -147,6 +350,10 @@ public enum AgentHooksInstall {
         ("Stop", "stop"),
     ]
 
+    /// statusHookTimeout is the seconds an agent gives one generated status hook before cancelling it; the
+    /// agent's action goes ahead either way. Claude Code and Codex otherwise wait 600 s.
+    static let statusHookTimeout = 5
+
     /// The destination directory for Pi's auto-discovered global extensions.
     static func piExtensionDirectory(home: String) -> String {
         home + "/.pi/agent/extensions"
@@ -182,7 +389,8 @@ public enum AgentHooksInstall {
     ///
     /// `existing` is the current contents (nil/empty = start from a fresh object). Returns the new JSON and
     /// whether it differs; idempotent — hooks already present (detected by the adapter command) return the
-    /// input with `changed == false`. Unrelated hooks and keys are preserved; invalid JSON, and a `hooks` or
+    /// input with `changed == false` unless one matching the generated command exactly lacks a `timeout`,
+    /// which then gets one in place. Unrelated hooks and keys are preserved; invalid JSON, and a `hooks` or
     /// written-event value of the wrong shape, throw rather than overwrite what could not be read. Entries a
     /// PRIOR install pointed straight at the generic wrapper are migrated onto the Claude adapter first, so
     /// the ownership guard reaches an existing install rather than only a fresh one.
@@ -192,6 +400,7 @@ public enum AgentHooksInstall {
 
         var hooks = try claudeHooksObject(root)
         var didChange = migrateClaudeEntriesToAdapter(&hooks, scriptDir: scriptDir)
+        if addClaudeHookTimeouts(&hooks, scriptDir: scriptDir) { didChange = true }
         for hook in claudeHooks {
             var entries = hooks[hook.event] as? [[String: Any]] ?? [] // shape already checked above
             if entries.contains(where: { entryUsesWrapper($0, scriptDir: scriptDir) }) {
@@ -432,6 +641,7 @@ public enum AgentHooksInstall {
             [[hooks.\(hook.event).hooks]]
             type = "command"
             command = \(tomlBasicString(wrapper + " " + hook.action))
+            timeout = \(statusHookTimeout)
             """
         }.joined(separator: "\n\n")
     }
@@ -501,10 +711,40 @@ public enum AgentHooksInstall {
         return didChange
     }
 
-    // a single Claude hook entry: { (matcher?), hooks: [{ type: command, command }] }.
+    // add `timeout` to every entry this installer generated without one, returning whether anything changed.
+    // claude code otherwise waits up to 600 s on a status write the agent's turn does not need. a command is
+    // ours only when it matches the generated one byte for byte, and a timeout the user set is kept.
+    private static func addClaudeHookTimeouts(_ hooks: inout [String: Any], scriptDir: String) -> Bool {
+        let command = wrapperCommand(scriptDir: scriptDir)
+        var didChange = false
+        for hook in claudeHooks {
+            guard var entries = hooks[hook.event] as? [[String: Any]] else { continue }
+            var eventChanged = false
+            for index in entries.indices {
+                guard var commands = entries[index]["hooks"] as? [[String: Any]] else { continue }
+                var entryChanged = false
+                for slot in commands.indices
+                where commands[slot]["command"] as? String == command + hook.state && commands[slot]["timeout"] == nil {
+                    commands[slot]["timeout"] = statusHookTimeout
+                    entryChanged = true
+                }
+                if entryChanged {
+                    entries[index]["hooks"] = commands
+                    eventChanged = true
+                }
+            }
+            if eventChanged {
+                hooks[hook.event] = entries
+                didChange = true
+            }
+        }
+        return didChange
+    }
+
+    // a single Claude hook entry: { (matcher?), hooks: [{ type: command, command, timeout }] }.
     private static func hookEntry(command: String, state: String, matcher: String?) -> [String: Any] {
         var entry: [String: Any] = [
-            "hooks": [["type": "command", "command": command + state]],
+            "hooks": [["type": "command", "command": command + state, "timeout": statusHookTimeout]],
         ]
         if let matcher {
             entry["matcher"] = matcher
@@ -552,8 +792,9 @@ public enum AgentHooksInstall {
     }
 
     // serialize a dictionary to pretty-printed, sorted JSON text (deterministic for tests + diffs).
-    private static func serialize(_ object: [String: Any]) -> String {
-        let options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys]
+    private static func serialize(_ object: [String: Any], escapingSlashes: Bool = true) -> String {
+        var options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys]
+        if !escapingSlashes { options.insert(.withoutEscapingSlashes) }
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: options),
               let text = String(data: data, encoding: .utf8) else {
             return "{}"

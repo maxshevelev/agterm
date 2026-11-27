@@ -30,6 +30,7 @@ its *needs* column, so searching this page for `claude` or `kiro` finds those di
 | [antigravity-session-resume](antigravity-session-resume/) | each tab reopens its own Antigravity CLI conversation after a restart | 0.16.0, zsh, Antigravity CLI | [@stn1slv](https://github.com/stn1slv) |
 | [claude-session-resume](claude-session-resume/) | each tab reopens its own Claude Code conversation after a restart | 0.3.1, zsh or fish, Claude Code | [@ssgreg](https://github.com/ssgreg) |
 | [codex-session-resume](codex-session-resume/) | each tab reopens its own codex conversation after a restart | 0.3.1, zsh, Codex CLI | [@brusnigin](https://github.com/brusnigin) |
+| [copilot-session-resume](copilot-session-resume/) | each pane reopens its own Copilot CLI conversation after a restart | 0.26.0, zsh, Copilot CLI | [@stn1slv](https://github.com/stn1slv) |
 | [kimi-session-resume](kimi-session-resume/) | each tab reopens its own Kimi Code conversation after a restart | 0.16.0, Kimi Code, python3 | [@x9x9x9x9x9x91](https://github.com/x9x9x9x9x9x91) |
 | [opencode-session-resume](opencode-session-resume/) | each tab reopens its own opencode conversation after a restart | 0.3.1, zsh, opencode | [@cherkale](https://github.com/cherkale) |
 
@@ -50,7 +51,7 @@ its *needs* column, so searching this page for `claude` or `kiro` finds those di
 | [claude-recap](claude-recap/) | one key lists what the Claude Code run in a session was working on | 0.10.0, zsh, jq, Claude Code | [@umputun](https://github.com/umputun) |
 | [close-tab-when-done](close-tab-when-done/) | arm a tab with a chord and it closes itself when the agent stops replying | 0.22.0, jq, Claude Code | [@andr81](https://github.com/andr81) |
 | [container-agent-status](container-agent-status/) | a containerized agent reports status onto its sidebar row via a TCP notification to the host | 0.7.1, nc, timeout, Claude Code | [@nquo](https://github.com/nquo) |
-| [copilot-agent-status](copilot-agent-status/) | Copilot CLI sessions report active, blocked, and completed onto their sidebar row | 0.7.1, Copilot CLI | [@rychkov](https://github.com/rychkov) |
+| [copilot-agent-status](copilot-agent-status/) | Copilot CLI sessions report active, blocked, and completed onto their sidebar row. **Help ▸ Install Agent Status Hooks…** now sets Copilot CLI up itself and moves an unchanged copy of this recipe aside; a changed copy it leaves in place still reports a subagent's stop as completed | 0.7.1, Copilot CLI | [@rychkov](https://github.com/rychkov) |
 | [end-of-task-offer](end-of-task-offer/) | once the agent clears the title-bar line, offer to clear its conversation or close the session | 0.39.0, jq, session-context-nudge, Claude Code or Codex | [@umputun](https://github.com/umputun) |
 | [flag-recent-agents](flag-recent-agents/) | one chord lists the sessions whose agents reported a status lately, lets you untick any, and flags the rest | 0.38.0, jq | [@umputun](https://github.com/umputun) |
 | [html-doc-overlay](html-doc-overlay/) | ask Claude Code for a page about the issue, PR, plan or topic in hand, read it in an overlay, and optionally share it on an expiring link | 0.33.0, jq, python3, Claude Code, cloudflared for sharing | [@umputun](https://github.com/umputun) |
@@ -84,7 +85,7 @@ its *needs* column, so searching this page for `claude` or `kiro` finds those di
 | [same-dir](same-dir/) | sync working directory to target split pane | 0.10.0, jq, zsh | [@vladislav-yevtushenko](https://github.com/vladislav-yevtushenko) |
 | [sqlite-browser](sqlite-browser/) | pick one of the repo's SQLite databases and browse it in an overlay | 0.22.0, python3, tabiew | [@umputun](https://github.com/umputun) |
 
-Most recipes need `agtermctl` on your PATH; **Help ▸ Install Command Line Tool…** puts it there. Three of the five session-resume recipes are shell functions that read the environment agterm gives a session and never call the CLI; the Kimi and Antigravity ones use lifecycle hooks that pin the pane's restore command through `agtermctl`. Some recipes also need `jq`, `fzf`, or a particular shell, and each recipe's *Requirements* section says which, along with the minimum agterm version it needs. Recipes are snapshots rather than a maintained surface: the control API grows by addition, so they rarely break. Who fixes one that does depends on its author; see [Bugs and improvements](CONTRIBUTING.md#bugs-and-improvements).
+Most recipes need `agtermctl` on your PATH; **Help ▸ Install Command Line Tool…** puts it there. Four of the six session-resume recipes are shell functions that read the environment agterm gives a session and never call the CLI; the Kimi and Antigravity ones use lifecycle hooks that pin the pane's restore command through `agtermctl`. Some recipes also need `jq`, `fzf`, or a particular shell, and each recipe's *Requirements* section says which, along with the minimum agterm version it needs. Recipes are snapshots rather than a maintained surface: the control API grows by addition, so they rarely break. Who fixes one that does depends on its author; see [Bugs and improvements](CONTRIBUTING.md#bugs-and-improvements).
 
 ## Contributing a recipe
 
